@@ -18,7 +18,6 @@ import {
   SwarmStatusSchema,
   AgentProgressSchema,
   EvaluationSchema,
-  SpawnedAgentSchema,
   BeadSchema,
   type SwarmStatus,
   type AgentProgress,
@@ -27,6 +26,165 @@ import {
   type Bead,
 } from "./schemas";
 import { mcpCall } from "./agent-mail";
+import {
+  OutcomeSignalsSchema,
+  scoreImplicitFeedback,
+  outcomeToFeedback,
+  type OutcomeSignals,
+  type ScoredOutcome,
+  type FeedbackEvent,
+  DEFAULT_LEARNING_CONFIG,
+} from "./learning";
+
+// ============================================================================
+// Conflict Detection
+// ============================================================================
+
+/**
+ * Marker words that indicate positive directives
+ */
+const POSITIVE_MARKERS = [
+  "always",
+  "must",
+  "required",
+  "ensure",
+  "use",
+  "prefer",
+];
+
+/**
+ * Marker words that indicate negative directives
+ */
+const NEGATIVE_MARKERS = [
+  "never",
+  "dont",
+  "don't",
+  "avoid",
+  "forbid",
+  "no ",
+  "not ",
+];
+
+/**
+ * A detected conflict between subtask instructions
+ */
+export interface InstructionConflict {
+  subtask_a: number;
+  subtask_b: number;
+  directive_a: string;
+  directive_b: string;
+  conflict_type: "positive_negative" | "contradictory";
+  description: string;
+}
+
+/**
+ * Extract directives from text based on marker words
+ */
+function extractDirectives(text: string): {
+  positive: string[];
+  negative: string[];
+} {
+  const sentences = text.split(/[.!?\n]+/).map((s) => s.trim().toLowerCase());
+  const positive: string[] = [];
+  const negative: string[] = [];
+
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+
+    const hasPositive = POSITIVE_MARKERS.some((m) => sentence.includes(m));
+    const hasNegative = NEGATIVE_MARKERS.some((m) => sentence.includes(m));
+
+    if (hasPositive && !hasNegative) {
+      positive.push(sentence);
+    } else if (hasNegative) {
+      negative.push(sentence);
+    }
+  }
+
+  return { positive, negative };
+}
+
+/**
+ * Check if two directives conflict
+ *
+ * Simple heuristic: look for common subjects with opposite polarity
+ */
+function directivesConflict(positive: string, negative: string): boolean {
+  // Extract key nouns/concepts (simple word overlap check)
+  const positiveWords = new Set(
+    positive.split(/\s+/).filter((w) => w.length > 3),
+  );
+  const negativeWords = negative.split(/\s+/).filter((w) => w.length > 3);
+
+  // If they share significant words, they might conflict
+  const overlap = negativeWords.filter((w) => positiveWords.has(w));
+  return overlap.length >= 2;
+}
+
+/**
+ * Detect conflicts between subtask instructions
+ *
+ * Looks for cases where one subtask says "always use X" and another says "avoid X".
+ *
+ * @param subtasks - Array of subtask descriptions
+ * @returns Array of detected conflicts
+ *
+ * @see https://github.com/Dicklesworthstone/cass_memory_system/blob/main/src/curate.ts#L36-L89
+ */
+export function detectInstructionConflicts(
+  subtasks: Array<{ title: string; description?: string }>,
+): InstructionConflict[] {
+  const conflicts: InstructionConflict[] = [];
+
+  // Extract directives from each subtask
+  const subtaskDirectives = subtasks.map((s, i) => ({
+    index: i,
+    title: s.title,
+    ...extractDirectives(`${s.title} ${s.description || ""}`),
+  }));
+
+  // Compare each pair of subtasks
+  for (let i = 0; i < subtaskDirectives.length; i++) {
+    for (let j = i + 1; j < subtaskDirectives.length; j++) {
+      const a = subtaskDirectives[i];
+      const b = subtaskDirectives[j];
+
+      // Check if A's positive conflicts with B's negative
+      for (const posA of a.positive) {
+        for (const negB of b.negative) {
+          if (directivesConflict(posA, negB)) {
+            conflicts.push({
+              subtask_a: i,
+              subtask_b: j,
+              directive_a: posA,
+              directive_b: negB,
+              conflict_type: "positive_negative",
+              description: `Subtask ${i} says "${posA}" but subtask ${j} says "${negB}"`,
+            });
+          }
+        }
+      }
+
+      // Check if B's positive conflicts with A's negative
+      for (const posB of b.positive) {
+        for (const negA of a.negative) {
+          if (directivesConflict(posB, negA)) {
+            conflicts.push({
+              subtask_a: j,
+              subtask_b: i,
+              directive_a: posB,
+              directive_b: negA,
+              conflict_type: "positive_negative",
+              description: `Subtask ${j} says "${posB}" but subtask ${i} says "${negA}"`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return conflicts;
+}
 
 // ============================================================================
 // Prompt Templates
@@ -353,6 +511,93 @@ function formatProgressMessage(progress: AgentProgress): string {
 }
 
 // ============================================================================
+// CASS History Integration
+// ============================================================================
+
+/**
+ * CASS search result from similar past tasks
+ */
+interface CassSearchResult {
+  query: string;
+  results: Array<{
+    source_path: string;
+    line: number;
+    agent: string;
+    preview: string;
+    score: number;
+  }>;
+}
+
+/**
+ * Query CASS for similar past tasks
+ *
+ * @param task - Task description to search for
+ * @param limit - Maximum results to return
+ * @returns Search results or null if CASS unavailable
+ */
+async function queryCassHistory(
+  task: string,
+  limit: number = 3,
+): Promise<CassSearchResult | null> {
+  try {
+    const result = await Bun.$`cass search ${task} --limit ${limit} --json`
+      .quiet()
+      .nothrow();
+
+    if (result.exitCode === 127) {
+      // CASS not installed
+      return null;
+    }
+
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    const output = result.stdout.toString();
+    if (!output.trim()) {
+      return { query: task, results: [] };
+    }
+
+    try {
+      const parsed = JSON.parse(output);
+      return {
+        query: task,
+        results: Array.isArray(parsed) ? parsed : parsed.results || [],
+      };
+    } catch {
+      return { query: task, results: [] };
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format CASS history for inclusion in decomposition prompt
+ */
+function formatCassHistoryForPrompt(history: CassSearchResult): string {
+  if (history.results.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "## Similar Past Tasks",
+    "",
+    "These similar tasks were found in agent history:",
+    "",
+    ...history.results.slice(0, 3).map((r, i) => {
+      const preview = r.preview.slice(0, 200).replace(/\n/g, " ");
+      return `${i + 1}. [${r.agent}] ${preview}...`;
+    }),
+    "",
+    "Consider patterns that worked in these past tasks.",
+    "",
+  ];
+
+  return lines.join("\n");
+}
+
+// ============================================================================
 // Tool Definitions
 // ============================================================================
 
@@ -361,10 +606,12 @@ function formatProgressMessage(progress: AgentProgress): string {
  *
  * This is a PROMPT tool - it returns a prompt for the agent to respond to.
  * The agent's response (JSON) should be validated with BeadTreeSchema.
+ *
+ * Optionally queries CASS for similar past tasks to inform decomposition.
  */
 export const swarm_decompose = tool({
   description:
-    "Generate decomposition prompt for breaking task into parallelizable subtasks",
+    "Generate decomposition prompt for breaking task into parallelizable subtasks. Optionally queries CASS for similar past tasks.",
   args: {
     task: tool.schema.string().min(1).describe("Task description to decompose"),
     max_subtasks: tool.schema
@@ -378,12 +625,39 @@ export const swarm_decompose = tool({
       .string()
       .optional()
       .describe("Additional context (codebase info, constraints, etc.)"),
+    query_cass: tool.schema
+      .boolean()
+      .optional()
+      .describe("Query CASS for similar past tasks (default: true)"),
+    cass_limit: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .optional()
+      .describe("Max CASS results to include (default: 3)"),
   },
   async execute(args) {
+    // Query CASS for similar past tasks
+    let cassContext = "";
+    let cassResult: CassSearchResult | null = null;
+
+    if (args.query_cass !== false) {
+      cassResult = await queryCassHistory(args.task, args.cass_limit ?? 3);
+      if (cassResult && cassResult.results.length > 0) {
+        cassContext = formatCassHistoryForPrompt(cassResult);
+      }
+    }
+
+    // Combine user context with CASS history
+    const fullContext = [args.context, cassContext]
+      .filter(Boolean)
+      .join("\n\n");
+
     const prompt = formatDecompositionPrompt(
       args.task,
       args.max_subtasks ?? 5,
-      args.context,
+      fullContext || undefined,
     );
 
     // Return the prompt and schema info for the caller
@@ -405,6 +679,13 @@ export const swarm_decompose = tool({
         },
         validation_note:
           "Parse agent response as JSON and validate with BeadTreeSchema from schemas/bead.ts",
+        cass_history: cassResult
+          ? {
+              queried: true,
+              results_found: cassResult.results.length,
+              included_in_context: cassResult.results.length > 0,
+            }
+          : { queried: false, reason: "disabled or unavailable" },
       },
       null,
       2,
@@ -472,6 +753,11 @@ export const swarm_validate_decomposition = tool({
         }
       }
 
+      // Check for instruction conflicts between subtasks
+      const instructionConflicts = detectInstructionConflicts(
+        validated.subtasks,
+      );
+
       return JSON.stringify(
         {
           valid: true,
@@ -484,6 +770,14 @@ export const swarm_validate_decomposition = tool({
               0,
             ),
           },
+          // Include conflicts as warnings (not blocking)
+          warnings:
+            instructionConflicts.length > 0
+              ? {
+                  instruction_conflicts: instructionConflicts,
+                  hint: "Review these potential conflicts between subtask instructions",
+                }
+              : undefined,
         },
         null,
         2,
@@ -680,13 +974,92 @@ export const swarm_progress = tool({
 });
 
 /**
+ * UBS scan result schema
+ */
+interface UbsScanResult {
+  exitCode: number;
+  bugs: Array<{
+    file: string;
+    line: number;
+    severity: string;
+    message: string;
+    category: string;
+  }>;
+  summary: {
+    total: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
+
+/**
+ * Run UBS scan on files before completion
+ *
+ * @param files - Files to scan
+ * @returns Scan result or null if UBS not available
+ */
+async function runUbsScan(files: string[]): Promise<UbsScanResult | null> {
+  if (files.length === 0) {
+    return null;
+  }
+
+  try {
+    // Run UBS scan with JSON output
+    const result = await Bun.$`ubs scan ${files.join(" ")} --json`
+      .quiet()
+      .nothrow();
+
+    if (result.exitCode === 127) {
+      // UBS not installed
+      return null;
+    }
+
+    const output = result.stdout.toString();
+    if (!output.trim()) {
+      return {
+        exitCode: result.exitCode,
+        bugs: [],
+        summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0 },
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(output);
+      return {
+        exitCode: result.exitCode,
+        bugs: parsed.bugs || [],
+        summary: parsed.summary || {
+          total: 0,
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+        },
+      };
+    } catch {
+      // UBS output wasn't JSON, return basic result
+      return {
+        exitCode: result.exitCode,
+        bugs: [],
+        summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0 },
+      };
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Mark a subtask as complete
  *
  * Closes bead, releases reservations, notifies coordinator.
+ * Optionally runs UBS scan on modified files before completion.
  */
 export const swarm_complete = tool({
   description:
-    "Mark subtask complete, release reservations, notify coordinator",
+    "Mark subtask complete, release reservations, notify coordinator. Runs UBS bug scan if files_touched provided.",
   args: {
     project_key: tool.schema.string().describe("Project path"),
     agent_name: tool.schema.string().describe("Your Agent Mail name"),
@@ -696,8 +1069,43 @@ export const swarm_complete = tool({
       .string()
       .optional()
       .describe("Self-evaluation JSON (Evaluation schema)"),
+    files_touched: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Files modified - will be scanned by UBS for bugs"),
+    skip_ubs_scan: tool.schema
+      .boolean()
+      .optional()
+      .describe("Skip UBS bug scan (default: false)"),
   },
   async execute(args) {
+    // Run UBS scan on modified files if provided
+    let ubsResult: UbsScanResult | null = null;
+    if (
+      args.files_touched &&
+      args.files_touched.length > 0 &&
+      !args.skip_ubs_scan
+    ) {
+      ubsResult = await runUbsScan(args.files_touched);
+
+      // Block completion if critical bugs found
+      if (ubsResult && ubsResult.summary.critical > 0) {
+        return JSON.stringify(
+          {
+            success: false,
+            error: "UBS found critical bugs - fix before completing",
+            ubs_scan: {
+              critical_count: ubsResult.summary.critical,
+              bugs: ubsResult.bugs.filter((b) => b.severity === "critical"),
+            },
+            hint: "Fix the critical bugs and try again, or use skip_ubs_scan=true to bypass",
+          },
+          null,
+          2,
+        );
+      }
+    }
+
     // Parse and validate evaluation if provided
     let parsedEvaluation: Evaluation | undefined;
     if (args.evaluation) {
@@ -787,6 +1195,121 @@ export const swarm_complete = tool({
         closed: true,
         reservations_released: true,
         message_sent: true,
+        ubs_scan: ubsResult
+          ? {
+              ran: true,
+              bugs_found: ubsResult.summary.total,
+              summary: ubsResult.summary,
+              warnings: ubsResult.bugs.filter((b) => b.severity !== "critical"),
+            }
+          : {
+              ran: false,
+              reason: args.skip_ubs_scan
+                ? "skipped"
+                : "no files or ubs unavailable",
+            },
+      },
+      null,
+      2,
+    );
+  },
+});
+
+/**
+ * Record outcome signals from a completed subtask
+ *
+ * Tracks implicit feedback (duration, errors, retries) to score
+ * decomposition quality over time. This data feeds into criterion
+ * weight calculations.
+ *
+ * @see src/learning.ts for scoring logic
+ */
+export const swarm_record_outcome = tool({
+  description:
+    "Record subtask outcome for implicit feedback scoring. Tracks duration, errors, retries to learn decomposition quality.",
+  args: {
+    bead_id: tool.schema.string().describe("Subtask bead ID"),
+    duration_ms: tool.schema
+      .number()
+      .int()
+      .min(0)
+      .describe("Duration in milliseconds"),
+    error_count: tool.schema
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe("Number of errors encountered"),
+    retry_count: tool.schema
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe("Number of retry attempts"),
+    success: tool.schema.boolean().describe("Whether the subtask succeeded"),
+    files_touched: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Files that were modified"),
+    criteria: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe(
+        "Criteria to generate feedback for (default: all default criteria)",
+      ),
+  },
+  async execute(args) {
+    // Build outcome signals
+    const signals: OutcomeSignals = {
+      bead_id: args.bead_id,
+      duration_ms: args.duration_ms,
+      error_count: args.error_count ?? 0,
+      retry_count: args.retry_count ?? 0,
+      success: args.success,
+      files_touched: args.files_touched ?? [],
+      timestamp: new Date().toISOString(),
+    };
+
+    // Validate signals
+    const validated = OutcomeSignalsSchema.parse(signals);
+
+    // Score the outcome
+    const scored: ScoredOutcome = scoreImplicitFeedback(
+      validated,
+      DEFAULT_LEARNING_CONFIG,
+    );
+
+    // Generate feedback events for each criterion
+    const criteriaToScore = args.criteria ?? [
+      "type_safe",
+      "no_bugs",
+      "patterns",
+      "readable",
+    ];
+    const feedbackEvents: FeedbackEvent[] = criteriaToScore.map((criterion) =>
+      outcomeToFeedback(scored, criterion),
+    );
+
+    return JSON.stringify(
+      {
+        success: true,
+        outcome: {
+          signals: validated,
+          scored: {
+            type: scored.type,
+            decayed_value: scored.decayed_value,
+            reasoning: scored.reasoning,
+          },
+        },
+        feedback_events: feedbackEvents,
+        summary: {
+          feedback_type: scored.type,
+          duration_seconds: Math.round(args.duration_ms / 1000),
+          error_count: args.error_count ?? 0,
+          retry_count: args.retry_count ?? 0,
+          success: args.success,
+        },
+        note: "Feedback events should be stored for criterion weight calculation. Use learning.ts functions to apply weights.",
       },
       null,
       2,
@@ -877,11 +1400,12 @@ export const swarm_evaluation_prompt = tool({
 // ============================================================================
 
 export const swarmTools = {
-  "swarm_decompose": swarm_decompose,
-  "swarm_validate_decomposition": swarm_validate_decomposition,
-  "swarm_status": swarm_status,
-  "swarm_progress": swarm_progress,
-  "swarm_complete": swarm_complete,
-  "swarm_subtask_prompt": swarm_subtask_prompt,
-  "swarm_evaluation_prompt": swarm_evaluation_prompt,
+  swarm_decompose: swarm_decompose,
+  swarm_validate_decomposition: swarm_validate_decomposition,
+  swarm_status: swarm_status,
+  swarm_progress: swarm_progress,
+  swarm_complete: swarm_complete,
+  swarm_record_outcome: swarm_record_outcome,
+  swarm_subtask_prompt: swarm_subtask_prompt,
+  swarm_evaluation_prompt: swarm_evaluation_prompt,
 };

@@ -3,6 +3,11 @@
  *
  * These schemas define the expected format for agent self-evaluations
  * and coordinator evaluations of completed work.
+ *
+ * Includes support for confidence decay - criteria weights fade over time
+ * unless revalidated by successful outcomes.
+ *
+ * @see src/learning.ts for decay calculations
  */
 import { z } from "zod";
 
@@ -17,6 +22,25 @@ export const CriterionEvaluationSchema = z.object({
   score: z.number().min(0).max(1).optional(), // 0-1 normalized score
 });
 export type CriterionEvaluation = z.infer<typeof CriterionEvaluationSchema>;
+
+/**
+ * Weighted criterion evaluation with confidence decay
+ *
+ * Extends CriterionEvaluation with weight information from learning.
+ * Lower weights indicate criteria that have been historically unreliable.
+ */
+export const WeightedCriterionEvaluationSchema =
+  CriterionEvaluationSchema.extend({
+    /** Current weight after decay (0-1, lower = less reliable) */
+    weight: z.number().min(0).max(1).default(1),
+    /** Weighted score = score * weight */
+    weighted_score: z.number().min(0).max(1).optional(),
+    /** Whether this criterion is deprecated due to high failure rate */
+    deprecated: z.boolean().default(false),
+  });
+export type WeightedCriterionEvaluation = z.infer<
+  typeof WeightedCriterionEvaluationSchema
+>;
 
 /**
  * Full evaluation result
@@ -56,6 +80,26 @@ export const EvaluationRequestSchema = z.object({
   context: z.string().optional(),
 });
 export type EvaluationRequest = z.infer<typeof EvaluationRequestSchema>;
+
+/**
+ * Weighted evaluation result with confidence-adjusted scores
+ *
+ * Used when applying learned weights to evaluation criteria.
+ */
+export const WeightedEvaluationSchema = z.object({
+  passed: z.boolean(),
+  criteria: z.record(z.string(), WeightedCriterionEvaluationSchema),
+  overall_feedback: z.string(),
+  retry_suggestion: z.string().nullable(),
+  timestamp: z.string().optional(), // ISO-8601
+  /** Average weight across all criteria (indicates overall confidence) */
+  average_weight: z.number().min(0).max(1).optional(),
+  /** Raw score before weighting */
+  raw_score: z.number().min(0).max(1).optional(),
+  /** Weighted score after applying criterion weights */
+  weighted_score: z.number().min(0).max(1).optional(),
+});
+export type WeightedEvaluation = z.infer<typeof WeightedEvaluationSchema>;
 
 /**
  * Aggregated evaluation results for a swarm

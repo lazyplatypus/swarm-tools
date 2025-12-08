@@ -35,13 +35,17 @@ export {
 // Evaluation schemas
 export {
   CriterionEvaluationSchema,
+  WeightedCriterionEvaluationSchema,
   EvaluationSchema,
+  WeightedEvaluationSchema,
   EvaluationRequestSchema,
   SwarmEvaluationResultSchema,
   ValidationResultSchema,
   DEFAULT_CRITERIA,
   type CriterionEvaluation,
+  type WeightedCriterionEvaluation,
   type Evaluation,
+  type WeightedEvaluation,
   type EvaluationRequest,
   type SwarmEvaluationResult,
   type ValidationResult,
