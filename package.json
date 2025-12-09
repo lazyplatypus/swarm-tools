@@ -1,10 +1,13 @@
 {
   "name": "opencode-swarm-plugin",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Multi-agent swarm coordination for OpenCode with learning capabilities, beads integration, and Agent Mail",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "opencode-swarm-setup": "./scripts/setup.ts"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

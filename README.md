@@ -20,7 +20,80 @@ This plugin provides intelligent, self-improving tools for multi-agent workflows
 - **Graceful degradation** - Works with whatever tools are available, degrades features when tools missing
 - **Swarm discipline** - Enforces beads tracking, aggressive planning, and agent communication
 
-## Installation
+## Quick Start (macOS)
+
+Run the setup script to check and install dependencies:
+
+```bash
+# Install the package
+npm install opencode-swarm-plugin
+
+# Run setup (checks deps, copies plugin + examples)
+npx opencode-swarm-setup
+```
+
+Or manually:
+
+```bash
+# 1. Install OpenCode
+brew install sst/tap/opencode
+
+# 2. Install Beads CLI
+npm install -g @joelhooks/beads
+
+# 3. Copy plugin to OpenCode
+mkdir -p ~/.config/opencode/plugins
+cp node_modules/opencode-swarm-plugin/dist/plugin.js ~/.config/opencode/plugins/swarm.js
+
+# 4. Copy examples (optional but recommended)
+mkdir -p ~/.config/opencode/commands ~/.config/opencode/agents
+cp node_modules/opencode-swarm-plugin/examples/commands/swarm.md ~/.config/opencode/commands/
+cp node_modules/opencode-swarm-plugin/examples/agents/swarm-planner.md ~/.config/opencode/agents/
+
+# 5. Initialize beads in your project
+cd your-project
+bd init
+```
+
+## Dependencies
+
+### Required
+
+| Dependency                                      | Purpose                   | Install                           |
+| ----------------------------------------------- | ------------------------- | --------------------------------- |
+| [OpenCode](https://opencode.ai)                 | Plugin host               | `brew install sst/tap/opencode`   |
+| [Beads CLI](https://github.com/joelhooks/beads) | Git-backed issue tracking | `npm install -g @joelhooks/beads` |
+
+### Optional (Graceful Degradation)
+
+The plugin works without these, but with reduced functionality:
+
+| Dependency                                            | Purpose                  | Without It                               |
+| ----------------------------------------------------- | ------------------------ | ---------------------------------------- |
+| [Agent Mail](https://github.com/joelhooks/agent-mail) | Multi-agent coordination | No file reservations, no agent messaging |
+| [Redis](https://redis.io)                             | Rate limiting            | Falls back to SQLite                     |
+| [CASS](https://github.com/Dicklesworthstone/cass)     | Historical context       | No "similar past tasks" in decomposition |
+| [UBS](https://github.com/joelhooks/ubs)               | Bug scanning             | No pre-completion validation             |
+
+### Verify Installation
+
+```bash
+# Check OpenCode
+opencode --version
+
+# Check Beads
+bd --version
+
+# Check Agent Mail (if using multi-agent)
+curl http://127.0.0.1:8765/health/liveness
+
+# Check Redis (optional)
+redis-cli ping
+```
+
+## Installation Details
+
+### From npm
 
 ```bash
 npm install opencode-swarm-plugin
@@ -30,38 +103,35 @@ bun add opencode-swarm-plugin
 pnpm add opencode-swarm-plugin
 ```
 
-Copy the plugin to your OpenCode plugins directory:
+### Plugin Setup
+
+Copy the plugin to OpenCode's plugins directory:
 
 ```bash
-cp node_modules/opencode-swarm-plugin/dist/plugin.js ~/.config/opencode/plugin/swarm.js
+mkdir -p ~/.config/opencode/plugins
+cp node_modules/opencode-swarm-plugin/dist/plugin.js ~/.config/opencode/plugins/swarm.js
 ```
 
-Plugins are automatically loaded from `~/.config/opencode/plugin/` - no config file changes needed.
+Plugins are automatically loaded from `~/.config/opencode/plugins/` - no config file changes needed.
+
+### Example Files
+
+Copy the `/swarm` command and `@swarm-planner` agent:
+
+```bash
+# Command
+mkdir -p ~/.config/opencode/commands
+cp node_modules/opencode-swarm-plugin/examples/commands/swarm.md ~/.config/opencode/commands/
+
+# Agent
+mkdir -p ~/.config/opencode/agents
+cp node_modules/opencode-swarm-plugin/examples/agents/swarm-planner.md ~/.config/opencode/agents/
+```
 
 > **Note:** The package has two entry points:
 >
 > - `dist/index.js` - Full library exports (schemas, errors, utilities, learning modules)
 > - `dist/plugin.js` - Plugin entry point that only exports the `plugin` function for OpenCode
-
-## Prerequisites
-
-| Requirement      | Purpose                                     |
-| ---------------- | ------------------------------------------- |
-| OpenCode 1.0+    | Plugin host                                 |
-| Agent Mail MCP   | Multi-agent coordination (`localhost:8765`) |
-| Beads CLI (`bd`) | Git-backed issue tracking                   |
-
-### Verify Agent Mail is running
-
-```bash
-curl http://127.0.0.1:8765/health/liveness
-```
-
-### Verify beads is installed
-
-```bash
-bd --version
-```
 
 ## Tools Reference
 
