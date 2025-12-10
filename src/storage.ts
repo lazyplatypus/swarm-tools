@@ -248,6 +248,9 @@ export class SemanticMemoryStorage implements LearningStorage {
     const result = await execSemanticMemory(args);
 
     if (result.exitCode !== 0) {
+      console.warn(
+        `[storage] semantic-memory find() failed with exit code ${result.exitCode}: ${result.stderr.toString().trim()}`,
+      );
       return [];
     }
 
@@ -268,7 +271,10 @@ export class SemanticMemoryStorage implements LearningStorage {
           return content;
         }
       });
-    } catch {
+    } catch (error) {
+      console.warn(
+        `[storage] Failed to parse semantic-memory find() output: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return [];
     }
   }
@@ -282,6 +288,9 @@ export class SemanticMemoryStorage implements LearningStorage {
     ]);
 
     if (result.exitCode !== 0) {
+      console.warn(
+        `[storage] semantic-memory list() failed with exit code ${result.exitCode}: ${result.stderr.toString().trim()}`,
+      );
       return [];
     }
 
@@ -300,7 +309,10 @@ export class SemanticMemoryStorage implements LearningStorage {
           return content;
         }
       });
-    } catch {
+    } catch (error) {
+      console.warn(
+        `[storage] Failed to parse semantic-memory list() output: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return [];
     }
   }

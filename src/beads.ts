@@ -171,7 +171,28 @@ export const beads_create = tool({
       );
     }
 
-    const bead = parseBead(result.stdout.toString());
+    // Validate output before parsing
+    const stdout = result.stdout.toString().trim();
+    if (!stdout) {
+      throw new BeadError(
+        "bd create returned empty output",
+        cmdParts.join(" "),
+        0,
+        "Empty stdout",
+      );
+    }
+
+    // Check for error messages in stdout (bd sometimes outputs errors to stdout)
+    if (stdout.startsWith("error:") || stdout.startsWith("Error:")) {
+      throw new BeadError(
+        `bd create failed: ${stdout}`,
+        cmdParts.join(" "),
+        0,
+        stdout,
+      );
+    }
+
+    const bead = parseBead(stdout);
     return JSON.stringify(bead, null, 2);
   },
 });
@@ -256,6 +277,7 @@ export const beads_create_epic = tool({
     } catch (error) {
       // Partial failure - execute rollback automatically
       const rollbackCommands: string[] = [];
+      const rollbackErrors: string[] = [];
 
       for (const bead of created) {
         try {
@@ -267,22 +289,42 @@ export const beads_create_epic = tool({
             "Rollback partial epic",
             "--json",
           ];
-          await Bun.$`${closeCmd}`.quiet().nothrow();
-          rollbackCommands.push(
-            `bd close ${bead.id} --reason "Rollback partial epic"`,
-          );
+          const rollbackResult = await Bun.$`${closeCmd}`.quiet().nothrow();
+          if (rollbackResult.exitCode === 0) {
+            rollbackCommands.push(
+              `bd close ${bead.id} --reason "Rollback partial epic"`,
+            );
+          } else {
+            rollbackErrors.push(
+              `${bead.id}: exit ${rollbackResult.exitCode} - ${rollbackResult.stderr.toString().trim()}`,
+            );
+          }
         } catch (rollbackError) {
-          // Log rollback failure but continue
+          // Log rollback failure and collect error
+          const errMsg =
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError);
           console.error(`Failed to rollback bead ${bead.id}:`, rollbackError);
+          rollbackErrors.push(`${bead.id}: ${errMsg}`);
         }
       }
 
-      // Throw error with rollback info
+      // Throw error with rollback info including any failures
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const rollbackInfo =
-        rollbackCommands.length > 0
-          ? `\n\nRolled back ${rollbackCommands.length} bead(s):\n${rollbackCommands.join("\n")}`
-          : "\n\nNo beads to rollback.";
+      let rollbackInfo = "";
+
+      if (rollbackCommands.length > 0) {
+        rollbackInfo += `\n\nRolled back ${rollbackCommands.length} bead(s):\n${rollbackCommands.join("\n")}`;
+      }
+
+      if (rollbackErrors.length > 0) {
+        rollbackInfo += `\n\nRollback failures (${rollbackErrors.length}):\n${rollbackErrors.join("\n")}`;
+      }
+
+      if (!rollbackInfo) {
+        rollbackInfo = "\n\nNo beads to rollback.";
+      }
 
       throw new BeadError(
         `Epic creation failed: ${errorMsg}${rollbackInfo}`,
@@ -510,14 +552,17 @@ export const beads_sync = tool({
 
     /**
      * Helper to run a command with timeout
+     * Properly clears the timeout to avoid lingering timers
      */
     const withTimeout = async <T>(
       promise: Promise<T>,
       timeoutMs: number,
       operation: string,
     ): Promise<T> => {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
           () =>
             reject(
               new BeadError(
@@ -526,9 +571,16 @@ export const beads_sync = tool({
               ),
             ),
           timeoutMs,
-        ),
-      );
-      return Promise.race([promise, timeoutPromise]);
+        );
+      });
+
+      try {
+        return await Promise.race([promise, timeoutPromise]);
+      } finally {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
+      }
     };
 
     // 1. Pull if requested
