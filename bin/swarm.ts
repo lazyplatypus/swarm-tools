@@ -366,13 +366,13 @@ const DEPENDENCIES: Dependency[] = [
     description: "Multi-agent coordination & file reservations",
   },
   {
-    name: "CASS",
+    name: "CASS (Coding Agent Session Search)",
     command: "cass",
     checkArgs: ["--help"],
     required: false,
-    install: "https://github.com/Dicklesworthstone/cass",
+    install: "https://github.com/Dicklesworthstone/coding_agent_session_search",
     installType: "manual",
-    description: "Cross-agent session search",
+    description: "Indexes and searches AI coding agent history for context",
   },
   {
     name: "UBS (Ultimate Bug Scanner)",
