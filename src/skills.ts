@@ -27,6 +27,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { readdir, readFile, stat, mkdir, writeFile, rm } from "fs/promises";
 import { join, basename, dirname, resolve, relative } from "path";
+import matter from "gray-matter";
 
 // =============================================================================
 // Types
@@ -97,7 +98,7 @@ export function setSkillsProjectDirectory(dir: string): void {
 // =============================================================================
 
 /**
- * Parse YAML frontmatter from markdown content
+ * Parse YAML frontmatter from markdown content using gray-matter
  *
  * Handles the common frontmatter format:
  * ```
@@ -111,68 +112,13 @@ export function parseFrontmatter(content: string): {
   metadata: Record<string, unknown>;
   body: string;
 } {
-  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
-
-  if (!match) {
+  try {
+    const { data, content: body } = matter(content);
+    return { metadata: data, body: body.trim() };
+  } catch {
+    // If gray-matter fails, return empty metadata and full content as body
     return { metadata: {}, body: content };
   }
-
-  const [, yamlContent, body] = match;
-  const metadata: Record<string, unknown> = {};
-
-  // Simple YAML parser for frontmatter (handles key: value and key: [array])
-  const lines = yamlContent.split("\n");
-  let currentKey: string | null = null;
-  let currentArray: string[] | null = null;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    // Check for array item
-    if (trimmed.startsWith("- ") && currentKey && currentArray !== null) {
-      currentArray.push(trimmed.slice(2).trim());
-      continue;
-    }
-
-    // Check for key: value
-    const colonIndex = trimmed.indexOf(":");
-    if (colonIndex > 0) {
-      // Save previous array if any
-      if (currentKey && currentArray !== null) {
-        metadata[currentKey] = currentArray;
-      }
-
-      currentKey = trimmed.slice(0, colonIndex).trim();
-      const value = trimmed.slice(colonIndex + 1).trim();
-
-      if (value === "" || value === "|" || value === ">") {
-        // Start of array or multiline
-        currentArray = [];
-      } else if (value.startsWith("[") && value.endsWith("]")) {
-        // Inline array: [a, b, c]
-        metadata[currentKey] = value
-          .slice(1, -1)
-          .split(",")
-          .map((s) => s.trim().replace(/^["']|["']$/g, ""));
-        currentKey = null;
-        currentArray = null;
-      } else {
-        // Simple value (strip quotes)
-        metadata[currentKey] = value.replace(/^["']|["']$/g, "");
-        currentKey = null;
-        currentArray = null;
-      }
-    }
-  }
-
-  // Save final array if any
-  if (currentKey && currentArray !== null) {
-    metadata[currentKey] = currentArray;
-  }
-
-  return { metadata, body: body.trim() };
 }
 
 /**
@@ -1324,7 +1270,6 @@ export async function findRelevantSkills(
 
   for (const [name, skill] of skills) {
     const descLower = skill.metadata.description.toLowerCase();
-    const bodyLower = skill.body.toLowerCase();
 
     // Check if task matches skill description keywords
     const keywords = descLower.split(/\s+/).filter((w) => w.length > 4);

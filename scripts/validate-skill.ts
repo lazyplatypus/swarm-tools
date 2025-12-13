@@ -10,41 +10,16 @@
  *   bun scripts/validate-skill.ts global-skills/debugging
  */
 
-import { readFile, readdir, stat } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, basename } from "path";
+import { parseFrontmatter } from "../src/skills.js";
 
 interface ValidationResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
   info: string[];
-}
-
-function parseFrontmatter(content: string): Record<string, unknown> | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return null;
-
-  const yaml = match[1];
-  const result: Record<string, unknown> = {};
-
-  for (const line of yaml.split("\n")) {
-    const colonIndex = line.indexOf(":");
-    if (colonIndex === -1) continue;
-
-    const key = line.slice(0, colonIndex).trim();
-    let value: unknown = line.slice(colonIndex + 1).trim();
-
-    // Handle arrays (simple single-line detection)
-    if (value === "") {
-      // Might be a multi-line array, skip for now
-      continue;
-    }
-
-    result[key] = value;
-  }
-
-  return result;
 }
 
 async function validateSkill(skillPath: string): Promise<ValidationResult> {
@@ -76,14 +51,14 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
   const content = await readFile(skillMdPath, "utf-8");
 
   // Check frontmatter
-  if (!content.startsWith("---\n")) {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
     result.errors.push("SKILL.md must start with YAML frontmatter (---)");
     result.valid = false;
     return result;
   }
 
-  const frontmatter = parseFrontmatter(content);
-  if (!frontmatter) {
+  const { metadata: frontmatter, body } = parseFrontmatter(content);
+  if (Object.keys(frontmatter).length === 0) {
     result.errors.push("Invalid YAML frontmatter format");
     result.valid = false;
     return result;
@@ -95,7 +70,7 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
     result.valid = false;
   } else if (frontmatter.name !== skillName) {
     result.warnings.push(
-      `Frontmatter name '${frontmatter.name}' doesn't match directory name '${skillName}'`
+      `Frontmatter name '${frontmatter.name}' doesn't match directory name '${skillName}'`,
     );
   }
 
@@ -116,17 +91,16 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
   }
 
   // Check for TODO placeholders in body
-  const body = content.slice(content.indexOf("---", 3) + 3);
   const todoCount = (body.match(/\[TODO/g) || []).length;
   if (todoCount > 0) {
     result.warnings.push(`Found ${todoCount} TODO placeholder(s) in body`);
   }
 
-  // Check body length
+  // Check body length (body is already extracted by parseFrontmatter)
   const lineCount = body.split("\n").length;
   if (lineCount > 500) {
     result.warnings.push(
-      `SKILL.md body is ${lineCount} lines (recommended < 500)`
+      `SKILL.md body is ${lineCount} lines (recommended < 500)`,
     );
   }
 
@@ -165,7 +139,7 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
   for (const file of unwantedFiles) {
     if (existsSync(join(skillPath, file))) {
       result.warnings.push(
-        `Found ${file} - skills should only contain SKILL.md and resources`
+        `Found ${file} - skills should only contain SKILL.md and resources`,
       );
     }
   }

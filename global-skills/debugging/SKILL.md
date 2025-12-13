@@ -9,6 +9,7 @@ tools:
   - swarm_accumulate_error
   - swarm_get_error_context
   - beads_create
+  - semantic-memory_store
 ---
 
 # Debugging Skill
@@ -40,6 +41,7 @@ Before fixing, ensure you can reproduce:
 ### 2. Gather Context
 
 Read surrounding code and error context:
+
 - Error message and stack trace
 - Recent changes to affected files
 - Related configuration files
@@ -48,6 +50,7 @@ Read surrounding code and error context:
 ### 3. Form Hypotheses
 
 Based on the error, list possible causes:
+
 1. Most likely cause based on error message
 2. Recent changes that could cause this
 3. Environmental/configuration issues
@@ -56,6 +59,7 @@ Based on the error, list possible causes:
 ### 4. Test Hypotheses Systematically
 
 For each hypothesis:
+
 1. Add targeted logging or assertions
 2. Modify one variable at a time
 3. Verify if behavior changes
@@ -64,6 +68,7 @@ For each hypothesis:
 ### 5. Implement Fix
 
 Once root cause is identified:
+
 1. Write the minimal fix
 2. Add regression test
 3. Verify original error is gone
@@ -71,47 +76,59 @@ Once root cause is identified:
 
 ### 6. Document Learning
 
-Use `swarm_learn` if you discovered a pattern worth preserving.
+Use `semantic-memory_store` if you discovered a pattern worth preserving for future sessions.
 
 ## Common Error Patterns
 
 ### Type Errors
+
 ```
 Error: Cannot read property 'x' of undefined
 ```
+
 **Check**: Variable initialization, null/undefined checks, async timing
 
 ### Import Errors
+
 ```
 Error: Module not found
 ```
+
 **Check**: Path correctness, package installation, export statements
 
 ### Timeout Errors
+
 ```
 Error: Timeout of 5000ms exceeded
 ```
+
 **Check**: Async operations, network calls, infinite loops
 
 ### Validation Errors
+
 ```
 Error: Validation failed for field 'x'
 ```
+
 **Check**: Input data, schema definitions, required fields
 
 ## Debugging Tools
 
 ### Console Logging
+
 ```typescript
-console.log('[DEBUG]', { variable, context });
+console.log("[DEBUG]", { variable, context });
 ```
 
 ### Breakpoints (if interactive)
+
 - Add `debugger;` statement
 - Use IDE breakpoints
 
 ### Binary Search
+
 For "it was working before":
+
 1. Find last known good commit
 2. Binary search through commits
 3. Identify the breaking change
@@ -119,6 +136,7 @@ For "it was working before":
 ## Swarm Integration
 
 When debugging in a swarm:
+
 1. **Report blocker immediately** - Don't spin alone
 2. **Share context** - Use `swarm_broadcast` with findings
 3. **Create beads** - Track discovered issues as bugs

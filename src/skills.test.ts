@@ -132,11 +132,11 @@ describe("parseFrontmatter", () => {
     expect(result.metadata.tools).toBeUndefined();
   });
 
-  it("returns empty array for missing name value", () => {
+  it("returns null for missing name value", () => {
     const result = parseFrontmatter(INVALID_FRONTMATTER_MD);
-    // YAML parses "name: " (empty value) as an empty array
+    // gray-matter/YAML parses "name: " (empty value) as null
     // Validation happens later in loadSkill
-    expect(result.metadata.name).toEqual([]);
+    expect(result.metadata.name).toBeNull();
   });
 
   it("returns empty result for content without frontmatter", () => {

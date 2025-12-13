@@ -8,8 +8,11 @@ tags:
 tools:
   - swarm_decompose
   - swarm_complete
+  - swarm_spawn_subtask
   - agentmail_init
   - agentmail_send
+  - agentmail_inbox
+  - agentmail_reserve
 ---
 
 # Swarm Coordination Skill
@@ -19,12 +22,14 @@ This skill provides guidance for effective multi-agent coordination in OpenCode 
 ## When to Use Swarm Coordination
 
 Use swarm coordination when:
+
 - A task has multiple independent subtasks that can run in parallel
 - The task requires different specializations (e.g., frontend + backend + tests)
 - Work can be divided by file/module boundaries
 - Time-to-completion matters and parallelization helps
 
 Do NOT use swarm coordination when:
+
 - The task is simple and can be done by one agent
 - Subtasks have heavy dependencies on each other
 - The overhead of coordination exceeds the benefit
@@ -34,6 +39,7 @@ Do NOT use swarm coordination when:
 ### 1. Analyze the Task
 
 Before decomposing, understand:
+
 - What are the distinct units of work?
 - Which parts can run in parallel vs sequentially?
 - What are the file/module boundaries?
@@ -42,6 +48,7 @@ Before decomposing, understand:
 ### 2. Choose a Decomposition Strategy
 
 **Parallel Strategy** - For independent subtasks:
+
 ```
 Parent Task: "Add user authentication"
 ├── Subtask 1: "Create auth API endpoints" (backend)
@@ -51,6 +58,7 @@ Parent Task: "Add user authentication"
 ```
 
 **Sequential Strategy** - When order matters:
+
 ```
 Parent Task: "Migrate database schema"
 ├── Step 1: "Create migration files"
@@ -60,6 +68,7 @@ Parent Task: "Migrate database schema"
 ```
 
 **Hybrid Strategy** - Mixed dependencies:
+
 ```
 Parent Task: "Add feature X"
 ├── Phase 1 (parallel):
@@ -84,19 +93,25 @@ When multiple agents work on the same codebase:
 ## Communication Patterns
 
 ### Broadcasting Updates
+
 ```
-agentmail_send(recipients: ["all"], message: "Completed API endpoints, ready for frontend integration")
+agentmail_send(to: ["all"], subject: "API Complete", body: "Completed API endpoints, ready for frontend integration")
 ```
 
 ### Direct Coordination
+
 ```
-agentmail_send(recipients: ["frontend-agent"], message: "Auth API is at /api/auth/*, here's the spec...")
+agentmail_send(to: ["frontend-agent"], subject: "Auth API Ready", body: "Auth API is at /api/auth/*, here's the spec...")
 ```
 
-### Blocking on Dependencies
+### Checking for Messages
+
 ```
-# Wait for a dependency before proceeding
-agentmail_receive(wait: true, filter: "api-complete")
+# Check inbox for updates (context-safe: max 5, no bodies)
+agentmail_inbox()
+
+# Read specific message when needed
+agentmail_read_message(message_id: 123)
 ```
 
 ## Best Practices
@@ -110,6 +125,7 @@ agentmail_receive(wait: true, filter: "api-complete")
 ## Common Patterns
 
 ### Feature Development
+
 ```yaml
 decomposition:
   strategy: hybrid
@@ -126,6 +142,7 @@ decomposition:
 ```
 
 ### Bug Fix Swarm
+
 ```yaml
 decomposition:
   strategy: sequential
@@ -137,6 +154,7 @@ decomposition:
 ```
 
 ### Refactoring
+
 ```yaml
 decomposition:
   strategy: parallel
