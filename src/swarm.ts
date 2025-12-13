@@ -48,6 +48,11 @@ import {
   formatToolAvailability,
   type ToolName,
 } from "./tool-availability";
+import {
+  getSkillsContextForSwarm,
+  findRelevantSkills,
+  listSkills,
+} from "./skills";
 
 // ============================================================================
 // Conflict Detection
@@ -708,6 +713,10 @@ Only modify these files. Need others? Message the coordinator.
 ### Agent Mail
 - agentmail_send (thread_id: {epic_id})
 
+### Skills (if available)
+- skills_list (discover available skills)
+- skills_use (activate a skill for specialized guidance)
+
 ### Completion
 - swarm_complete (REQUIRED when done)
 
@@ -1157,6 +1166,8 @@ const STRATEGY_DECOMPOSITION_PROMPT = `You are decomposing a task into paralleli
 
 {cass_history}
 
+{skills_context}
+
 ## MANDATORY: Beads Issue Tracking
 
 **Every subtask MUST become a bead.** This is non-negotiable.
@@ -1240,6 +1251,10 @@ export const swarm_plan_prompt = tool({
 
       .optional()
       .describe("Max CASS results to include (default: 3)"),
+    include_skills: tool.schema
+      .boolean()
+      .optional()
+      .describe("Include available skills in context (default: true)"),
   },
   async execute(args) {
     // Select strategy
@@ -1288,6 +1303,30 @@ export const swarm_plan_prompt = tool({
       cassResultInfo = { queried: false, reason: "disabled" };
     }
 
+    // Fetch skills context
+    let skillsContext = "";
+    let skillsInfo: { included: boolean; count?: number; relevant?: string[] } = {
+      included: false,
+    };
+
+    if (args.include_skills !== false) {
+      const allSkills = await listSkills();
+      if (allSkills.length > 0) {
+        skillsContext = await getSkillsContextForSwarm();
+        const relevantSkills = await findRelevantSkills(args.task);
+        skillsInfo = {
+          included: true,
+          count: allSkills.length,
+          relevant: relevantSkills,
+        };
+
+        // Add suggestion for relevant skills
+        if (relevantSkills.length > 0) {
+          skillsContext += `\n\n**Suggested skills for this task**: ${relevantSkills.join(", ")}`;
+        }
+      }
+    }
+
     // Format strategy guidelines
     const strategyGuidelines = formatStrategyGuidelines(selectedStrategy);
 
@@ -1301,6 +1340,7 @@ export const swarm_plan_prompt = tool({
       .replace("{strategy_guidelines}", strategyGuidelines)
       .replace("{context_section}", contextSection)
       .replace("{cass_history}", cassContext || "")
+      .replace("{skills_context}", skillsContext || "")
       .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString());
 
     return JSON.stringify(
@@ -1328,6 +1368,7 @@ export const swarm_plan_prompt = tool({
         validation_note:
           "Parse agent response as JSON and validate with swarm_validate_decomposition",
         cass_history: cassResultInfo,
+        skills: skillsInfo,
       },
       null,
       2,

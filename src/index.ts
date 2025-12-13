@@ -31,6 +31,7 @@ import {
 import { structuredTools } from "./structured";
 import { swarmTools } from "./swarm";
 import { repoCrawlTools } from "./repo-crawl";
+import { skillsTools, setSkillsProjectDirectory } from "./skills";
 
 /**
  * OpenCode Swarm Plugin
@@ -41,6 +42,7 @@ import { repoCrawlTools } from "./repo-crawl";
  * - structured:* - Structured output parsing and validation
  * - swarm:* - Swarm orchestration and task decomposition
  * - repo-crawl:* - GitHub API tools for repository research
+ * - skills:* - Agent skills discovery, activation, and execution
  *
  * @param input - Plugin context from OpenCode
  * @returns Plugin hooks including tools, events, and tool execution hooks
@@ -53,6 +55,10 @@ export const SwarmPlugin: Plugin = async (
   // Set the working directory for beads commands
   // This ensures bd runs in the project directory, not ~/.config/opencode
   setBeadsWorkingDirectory(directory);
+
+  // Set the project directory for skills discovery
+  // Skills are discovered from .opencode/skills/, .claude/skills/, or skills/
+  setSkillsProjectDirectory(directory);
 
   /** Track active sessions for cleanup */
   let activeAgentMailState: AgentMailState | null = null;
@@ -116,6 +122,7 @@ export const SwarmPlugin: Plugin = async (
       ...structuredTools,
       ...swarmTools,
       ...repoCrawlTools,
+      ...skillsTools,
     },
 
     /**
@@ -305,6 +312,7 @@ export const allTools = {
   ...structuredTools,
   ...swarmTools,
   ...repoCrawlTools,
+  ...skillsTools,
 } as const;
 
 /**
@@ -387,3 +395,33 @@ export {
  * - Graceful rate limit handling
  */
 export { repoCrawlTools, RepoCrawlError } from "./repo-crawl";
+
+/**
+ * Re-export skills module
+ *
+ * Implements Anthropic's Agent Skills specification for OpenCode.
+ *
+ * Includes:
+ * - skillsTools - All skills tools (list, use, execute, read)
+ * - discoverSkills, getSkill, listSkills - Discovery functions
+ * - parseFrontmatter - YAML frontmatter parser
+ * - getSkillsContextForSwarm - Swarm integration helper
+ * - findRelevantSkills - Task-based skill matching
+ *
+ * Types:
+ * - Skill, SkillMetadata, SkillRef - Skill data types
+ */
+export {
+  skillsTools,
+  discoverSkills,
+  getSkill,
+  listSkills,
+  parseFrontmatter,
+  setSkillsProjectDirectory,
+  invalidateSkillsCache,
+  getSkillsContextForSwarm,
+  findRelevantSkills,
+  type Skill,
+  type SkillMetadata,
+  type SkillRef,
+} from "./skills";
