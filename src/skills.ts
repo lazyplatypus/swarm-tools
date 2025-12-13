@@ -254,6 +254,14 @@ function getClaudeGlobalSkillsDir(): string {
 }
 
 /**
+ * Bundled skills from the package (lowest priority)
+ */
+function getPackageSkillsDir(): string {
+  // __dirname equivalent in ES modules - resolve relative to this file
+  return join(__dirname, "..", "global-skills");
+}
+
+/**
  * Find all SKILL.md files in a directory
  */
 async function findSkillFiles(baseDir: string): Promise<string[]> {
@@ -380,6 +388,9 @@ export async function discoverSkills(
 
   // 3. Check global Claude skills directory (compatibility)
   await loadSkillsFromDir(getClaudeGlobalSkillsDir());
+
+  // 4. Check bundled package skills (lowest priority)
+  await loadSkillsFromDir(getPackageSkillsDir());
 
   // Cache for future lookups
   if (!projectDir) {
@@ -1011,6 +1022,250 @@ executed with skills_execute. Use for:
 });
 
 // =============================================================================
+// Skill Initialization
+// =============================================================================
+
+/**
+ * Generate a skill template with TODO placeholders
+ */
+function generateSkillTemplate(name: string, description?: string): string {
+  const title = name
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+  return `---
+name: ${name}
+description: ${description || `[TODO: Complete description of what this skill does and WHEN to use it. Be specific about scenarios that trigger this skill.]`}
+tags:
+  - [TODO: add tags]
+---
+
+# ${title}
+
+## Overview
+
+[TODO: 1-2 sentences explaining what this skill enables]
+
+## When to Use This Skill
+
+[TODO: List specific scenarios when this skill should be activated:
+- When working on X type of task
+- When files matching Y pattern are involved
+- When the user asks about Z topic]
+
+## Instructions
+
+[TODO: Add actionable instructions for the agent. Use imperative form:
+- "Read the configuration file first"
+- "Check for existing patterns before creating new ones"
+- "Always validate output before completing"]
+
+## Examples
+
+### Example 1: [TODO: Realistic scenario]
+
+**User**: "[TODO: Example user request]"
+
+**Process**:
+1. [TODO: Step-by-step process]
+2. [TODO: Next step]
+3. [TODO: Final step]
+
+## Resources
+
+This skill may include additional resources:
+
+### scripts/
+Executable scripts for automation. Run with \`skills_execute\`.
+
+### references/
+Documentation loaded on-demand. Access with \`skills_read\`.
+
+---
+*Delete any unused sections and this line when skill is complete.*
+`;
+}
+
+/**
+ * Generate a reference template
+ */
+function generateReferenceTemplate(skillName: string): string {
+  const title = skillName
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+  return `# Reference Documentation for ${title}
+
+## Overview
+
+[TODO: Detailed reference material for this skill]
+
+## API Reference
+
+[TODO: If applicable, document APIs, schemas, or interfaces]
+
+## Detailed Workflows
+
+[TODO: Complex multi-step workflows that don't fit in SKILL.md]
+
+## Troubleshooting
+
+[TODO: Common issues and solutions]
+`;
+}
+
+/**
+ * Initialize a new skill with full directory structure
+ *
+ * Creates a skill template following best practices from the
+ * Anthropic Agent Skills specification and community patterns.
+ */
+export const skills_init = tool({
+  description: `Initialize a new skill with full directory structure and templates.
+
+Creates a complete skill directory with:
+- SKILL.md with frontmatter and TODO placeholders
+- scripts/ directory for executable helpers
+- references/ directory for on-demand documentation
+
+Use this instead of skills_create when you want the full template structure.
+Perfect for learning to create effective skills.`,
+  args: {
+    name: tool.schema
+      .string()
+      .regex(/^[a-z0-9-]+$/)
+      .max(64)
+      .describe("Skill name (lowercase, hyphens only)"),
+    description: tool.schema
+      .string()
+      .optional()
+      .describe("Initial description (can be a TODO placeholder)"),
+    directory: tool.schema
+      .enum([".opencode/skills", ".claude/skills", "skills", "global"])
+      .optional()
+      .describe("Where to create (default: .opencode/skills)"),
+    include_example_script: tool.schema
+      .boolean()
+      .default(true)
+      .describe("Include example script placeholder (default: true)"),
+    include_reference: tool.schema
+      .boolean()
+      .default(true)
+      .describe("Include reference doc placeholder (default: true)"),
+  },
+  async execute(args) {
+    // Check if skill already exists
+    const existing = await getSkill(args.name);
+    if (existing) {
+      return JSON.stringify(
+        {
+          success: false,
+          error: `Skill '${args.name}' already exists`,
+          existing_path: existing.path,
+        },
+        null,
+        2,
+      );
+    }
+
+    // Determine target directory
+    let skillDir: string;
+    if (args.directory === "global") {
+      skillDir = join(getGlobalSkillsDir(), args.name);
+    } else {
+      const baseDir = args.directory || DEFAULT_SKILLS_DIR;
+      skillDir = join(skillsProjectDirectory, baseDir, args.name);
+    }
+
+    const createdFiles: string[] = [];
+
+    try {
+      // Create skill directory
+      await mkdir(skillDir, { recursive: true });
+
+      // Create SKILL.md
+      const skillPath = join(skillDir, "SKILL.md");
+      const skillContent = generateSkillTemplate(args.name, args.description);
+      await writeFile(skillPath, skillContent, "utf-8");
+      createdFiles.push("SKILL.md");
+
+      // Create scripts/ directory with example
+      if (args.include_example_script !== false) {
+        const scriptsDir = join(skillDir, "scripts");
+        await mkdir(scriptsDir, { recursive: true });
+
+        const exampleScript = `#!/usr/bin/env bash
+# Example helper script for ${args.name}
+#
+# This is a placeholder. Replace with actual implementation or delete.
+#
+# Usage: skills_execute(skill: "${args.name}", script: "example.sh")
+
+echo "Hello from ${args.name} skill!"
+echo "Project directory: \$1"
+
+# TODO: Add actual script logic
+`;
+        const scriptPath = join(scriptsDir, "example.sh");
+        await writeFile(scriptPath, exampleScript, { mode: 0o755 });
+        createdFiles.push("scripts/example.sh");
+      }
+
+      // Create references/ directory with example
+      if (args.include_reference !== false) {
+        const refsDir = join(skillDir, "references");
+        await mkdir(refsDir, { recursive: true });
+
+        const refContent = generateReferenceTemplate(args.name);
+        const refPath = join(refsDir, "guide.md");
+        await writeFile(refPath, refContent, "utf-8");
+        createdFiles.push("references/guide.md");
+      }
+
+      // Invalidate cache
+      invalidateSkillsCache();
+
+      return JSON.stringify(
+        {
+          success: true,
+          skill: args.name,
+          path: skillDir,
+          created_files: createdFiles,
+          next_steps: [
+            "Edit SKILL.md to complete TODO placeholders",
+            "Update the description in frontmatter",
+            "Add specific 'When to Use' scenarios",
+            "Add actionable instructions",
+            "Delete unused sections and placeholder files",
+            "Test with skills_use to verify it works",
+          ],
+          tips: [
+            "Good descriptions explain WHEN to use, not just WHAT it does",
+            "Instructions should be imperative: 'Do X' not 'You should do X'",
+            "Include realistic examples with user requests",
+            "Progressive disclosure: keep SKILL.md lean, use references/ for details",
+          ],
+        },
+        null,
+        2,
+      );
+    } catch (error) {
+      return JSON.stringify(
+        {
+          success: false,
+          error: `Failed to initialize skill: ${error instanceof Error ? error.message : String(error)}`,
+          partial_files: createdFiles,
+        },
+        null,
+        2,
+      );
+    }
+  },
+});
+
+// =============================================================================
 // Tool Registry
 // =============================================================================
 
@@ -1026,6 +1281,7 @@ export const skillsTools = {
   skills_update,
   skills_delete,
   skills_add_script,
+  skills_init,
 };
 
 // =============================================================================
