@@ -26,7 +26,7 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { readdir, readFile, stat, mkdir, writeFile, rm } from "fs/promises";
-import { join, basename, dirname } from "path";
+import { join, basename, dirname, resolve, relative } from "path";
 
 // =============================================================================
 // Types
@@ -617,12 +617,18 @@ Use this to access supplementary skill resources.`,
       return `Skill '${args.skill}' not found.`;
     }
 
-    // Security: prevent path traversal
+    // Security: prevent path traversal with robust check
     if (args.file.includes("..") || args.file.startsWith("/")) {
       return "Invalid file path. Use relative paths without '..'";
     }
 
-    const filePath = join(skill.directory, args.file);
+    const filePath = resolve(skill.directory, args.file);
+    const relativePath = relative(skill.directory, filePath);
+
+    // Verify resolved path stays within skill directory
+    if (relativePath.startsWith("..") || relativePath.startsWith("/")) {
+      return "Invalid file path. Path escapes skill directory.";
+    }
 
     try {
       const content = await readFile(filePath, "utf-8");
