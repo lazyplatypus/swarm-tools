@@ -2744,12 +2744,17 @@ export const swarm_resolve_error = tool({
 /**
  * Initialize swarm and check tool availability
  *
- * Call this at the start of a swarm session to see what tools are available
- * and what features will be degraded.
+ * Call this at the start of a swarm session to see what tools are available,
+ * what skills exist in the project, and what features will be degraded.
+ *
+ * Skills are automatically discovered from:
+ * - .opencode/skills/
+ * - .claude/skills/
+ * - skills/
  */
 export const swarm_init = tool({
   description:
-    "Initialize swarm session and check tool availability. Call at swarm start to see what features are available.",
+    "Initialize swarm session: discovers available skills, checks tool availability. ALWAYS call at swarm start.",
   args: {
     project_path: tool.schema
       .string()
@@ -2798,6 +2803,26 @@ export const swarm_init = tool({
       degradedFeatures.push("persistent learning (using in-memory fallback)");
     }
 
+    // Discover available skills
+    const availableSkills = await listSkills();
+    const skillsInfo = {
+      count: availableSkills.length,
+      available: availableSkills.length > 0,
+      skills: availableSkills.map((s) => ({
+        name: s.name,
+        description: s.description,
+        hasScripts: s.hasScripts,
+      })),
+    };
+
+    // Add skills guidance if available
+    let skillsGuidance: string | undefined;
+    if (availableSkills.length > 0) {
+      skillsGuidance = `Found ${availableSkills.length} skill(s). Use skills_list to see details, skills_use to activate.`;
+    } else {
+      skillsGuidance = "No skills found. Add skills to .opencode/skills/ or .claude/skills/ for specialized guidance.";
+    }
+
     return JSON.stringify(
       {
         ready: true,
@@ -2810,10 +2835,12 @@ export const swarm_init = tool({
             },
           ]),
         ),
+        skills: skillsInfo,
         warnings: warnings.length > 0 ? warnings : undefined,
         degraded_features:
           degradedFeatures.length > 0 ? degradedFeatures : undefined,
         recommendations: {
+          skills: skillsGuidance,
           beads: beadsAvailable
             ? "✓ Use beads for all task tracking"
             : "Install beads: npm i -g @joelhooks/beads",
