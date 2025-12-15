@@ -13,7 +13,8 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node && tsc",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish:pkg": "npm publish --access public --provenance"
   },
   "dependencies": {
     "effect": "^3.19.12",

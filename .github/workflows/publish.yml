@@ -1,16 +1,20 @@
-name: Publish to npm
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
-  publish:
+  release:
+    name: Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,25 +31,19 @@ jobs:
       - name: Update npm to latest (for OIDC support)
         run: npm install -g npm@latest
 
-      - name: Verify npm version (requires 11.5.1+ for OIDC)
-        run: npm --version
-
       - name: Install dependencies
         run: bun install
-
-      - name: Type check
-        run: bun turbo typecheck
-
-      - name: Run tests
-        run: bun turbo test
 
       - name: Build packages
         run: bun turbo build
 
-      - name: Publish swarm-mail
-        working-directory: ./packages/swarm-mail
-        run: npm publish --access public --provenance
-
-      - name: Publish opencode-swarm-plugin
-        working-directory: ./packages/opencode-swarm-plugin
-        run: npm publish --access public --provenance
+      - name: Create Release Pull Request or Publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bunx changeset version
+          publish: bun run release
+          title: "chore: release packages"
+          commit: "chore: release packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
