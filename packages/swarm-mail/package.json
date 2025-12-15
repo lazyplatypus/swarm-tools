@@ -1,6 +1,7 @@
 {
   "name": "swarm-mail",
   "version": "0.1.1",
+  "description": "Event sourcing primitives for multi-agent coordination. Local-first, no external servers.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,6 +15,12 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joelhooks/opencode-swarm-plugin"
+  },
+  "author": "Joel Hooks",
+  "license": "MIT",
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node && tsc",
     "test": "vitest run --exclude '**/*.integration.test.ts'",
