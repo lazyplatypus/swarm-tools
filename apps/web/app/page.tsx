@@ -1,4 +1,4 @@
-import { GithubIcon } from '@hugeicons/react-pro';
+import { Github } from 'lucide-react';
 
 export default function Home() {
 	return (
@@ -47,7 +47,7 @@ export default function Home() {
 					rel="noopener noreferrer"
 					className="group relative px-8 py-3 bg-amber-500 text-neutral-950 font-semibold rounded-lg overflow-hidden transition-all hover:bg-amber-400 hover:scale-105 inline-flex items-center gap-2"
 				>
-					<GithubIcon size={20} className="relative z-10" />
+					<Github size={20} className="relative z-10" />
 					<span className="relative z-10">View on GitHub</span>
 					<div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
 				</a>

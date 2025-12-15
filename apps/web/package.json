@@ -11,11 +11,11 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@hugeicons/react-pro": "^0.3.2",
     "@types/mdx": "^2.0.13",
     "fumadocs-core": "^16.2.5",
     "fumadocs-mdx": "^14.1.0",
     "fumadocs-ui": "^16.2.5",
+    "lucide-react": "^0.561.0",
     "next": "^16.0.10",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
