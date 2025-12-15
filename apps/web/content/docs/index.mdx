@@ -1,0 +1,70 @@
+---
+title: Getting Started
+description: Framework-agnostic primitives for agentic systems
+---
+
+# Swarm Tools
+
+Framework-agnostic primitives for building agentic systems. Works with any AI agent - Claude, GPT, Gemini, or your own.
+
+## What's Inside
+
+| Package | Purpose |
+|---------|---------|
+| `@swarmtools/data` | Database adapters, migrations, PGLite |
+| `@swarmtools/mail` | Event sourcing, actor-model messaging |
+| `@swarmtools/vector` | Embeddings, vector storage |
+| `@swarmtools/learning` | Confidence decay, pattern maturity |
+| `@swarmtools/skills` | Knowledge injection, SKILL.md format |
+| `@swarmtools/structured` | Schema validation, JSON extraction |
+| `@swarmtools/guardrails` | Rate limiting, output guards |
+
+## Quick Start
+
+```bash
+# Install the package you need
+bun add @swarmtools/mail
+
+# Or install the OpenCode plugin (includes all packages)
+bun add @swarmtools/opencode
+```
+
+## Philosophy
+
+**Primitives, not frameworks.** Each package solves one problem well:
+
+- **Composable** - Mix and match what you need
+- **Zero lock-in** - Works with any agent framework
+- **Type-safe** - Full TypeScript with Zod schemas
+- **Fast** - Bun-native, minimal dependencies
+
+## Example: Event Sourcing with Mail
+
+```typescript
+import { EventStore, createPGLiteAdapter } from '@swarmtools/mail';
+
+// Create an event store
+const adapter = await createPGLiteAdapter('./data');
+const store = new EventStore(adapter);
+
+// Append events
+await store.append('agent-1', {
+  type: 'task.started',
+  payload: { taskId: 'bd-123', title: 'Fix the bug' }
+});
+
+// Project current state
+const state = await store.project('agent-1', (events) => {
+  return events.reduce((acc, e) => {
+    if (e.type === 'task.started') acc.currentTask = e.payload;
+    if (e.type === 'task.completed') acc.currentTask = null;
+    return acc;
+  }, { currentTask: null });
+});
+```
+
+## Next Steps
+
+- [Installation](/docs/installation) - Detailed setup guide
+- [Concepts](/docs/concepts) - Core ideas behind Swarm Tools
+- [Packages](/docs/packages) - Deep dive into each package

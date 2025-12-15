@@ -3,7 +3,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", ".next/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
     },
     "test": {
       "dependsOn": ["^build"]
@@ -11,6 +15,7 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "lint": {},
     "publish:pkg": {
       "dependsOn": ["build"],
       "cache": false
