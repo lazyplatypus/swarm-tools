@@ -30,6 +30,8 @@ import { fileURLToPath } from "url";
 import {
   checkBeadsMigrationNeeded,
   migrateBeadsToHive,
+  mergeHistoricBeads,
+  importJsonlToPGLite,
 } from "../src/hive";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1581,6 +1583,18 @@ async function setup() {
         if (result.migrated) {
           migrateSpinner.stop("Migration complete");
           p.log.success("Renamed .beads/ → .hive/");
+          
+          // Merge historic beads into issues.jsonl
+          const mergeResult = await mergeHistoricBeads(cwd);
+          if (mergeResult.merged > 0) {
+            p.log.success(`Merged ${mergeResult.merged} historic beads (${mergeResult.skipped} already present)`);
+          }
+          
+          // Import JSONL into PGLite database
+          const importResult = await importJsonlToPGLite(cwd);
+          if (importResult.imported > 0 || importResult.updated > 0) {
+            p.log.success(`Database: ${importResult.imported} imported, ${importResult.updated} updated`);
+          }
         } else {
           migrateSpinner.stop("Migration skipped");
           p.log.warn(result.reason || "Unknown reason");

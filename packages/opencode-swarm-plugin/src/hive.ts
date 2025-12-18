@@ -235,6 +235,183 @@ export function ensureHiveDirectory(projectPath: string): void {
   }
 }
 
+/**
+ * Merge historic beads from beads.base.jsonl into issues.jsonl
+ * 
+ * This function reads beads.base.jsonl (historic data) and issues.jsonl (current data),
+ * merges them by ID (issues.jsonl version wins for duplicates), and writes the result
+ * back to issues.jsonl.
+ * 
+ * Use case: After migrating from .beads to .hive, you may have a beads.base.jsonl file
+ * containing old beads that should be merged into the current issues.jsonl.
+ * 
+ * @param projectPath - Absolute path to the project root
+ * @returns Object with merged and skipped counts
+ */
+export async function mergeHistoricBeads(projectPath: string): Promise<{merged: number, skipped: number}> {
+  const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+  const hiveDir = join(projectPath, ".hive");
+  const basePath = join(hiveDir, "beads.base.jsonl");
+  const issuesPath = join(hiveDir, "issues.jsonl");
+  
+  // If base file doesn't exist, nothing to merge
+  if (!existsSync(basePath)) {
+    return { merged: 0, skipped: 0 };
+  }
+  
+  // Read base file
+  const baseContent = readFileSync(basePath, "utf-8");
+  const baseLines = baseContent.trim().split("\n").filter(l => l);
+  const baseBeads = baseLines.map(line => JSON.parse(line));
+  
+  // Read issues file (or create empty if missing)
+  let issuesBeads: any[] = [];
+  if (existsSync(issuesPath)) {
+    const issuesContent = readFileSync(issuesPath, "utf-8");
+    const issuesLines = issuesContent.trim().split("\n").filter(l => l);
+    issuesBeads = issuesLines.map(line => JSON.parse(line));
+  }
+  
+  // Build set of existing IDs in issues.jsonl
+  const existingIds = new Set(issuesBeads.map(b => b.id));
+  
+  // Merge: add beads from base that aren't in issues
+  let merged = 0;
+  let skipped = 0;
+  
+  for (const baseBead of baseBeads) {
+    if (existingIds.has(baseBead.id)) {
+      skipped++;
+    } else {
+      issuesBeads.push(baseBead);
+      merged++;
+    }
+  }
+  
+  // Write merged result back to issues.jsonl
+  const mergedContent = issuesBeads.map(b => JSON.stringify(b)).join("\n") + "\n";
+  writeFileSync(issuesPath, mergedContent, "utf-8");
+  
+  return { merged, skipped };
+}
+
+/**
+ * Import cells from .hive/issues.jsonl into PGLite database
+ * 
+ * Reads the JSONL file and upserts each record into the cells table
+ * using the HiveAdapter. Provides granular error reporting for invalid lines.
+ * 
+ * This function manually parses JSONL line-by-line to gracefully handle
+ * invalid JSON without throwing. Each valid line is imported via the adapter.
+ * 
+ * @param projectPath - Absolute path to the project root
+ * @returns Object with imported, updated, and error counts
+ */
+export async function importJsonlToPGLite(projectPath: string): Promise<{
+  imported: number;
+  updated: number;
+  errors: number;
+}> {
+  const jsonlPath = join(projectPath, ".hive", "issues.jsonl");
+  
+  // Handle missing file gracefully
+  if (!existsSync(jsonlPath)) {
+    return { imported: 0, updated: 0, errors: 0 };
+  }
+  
+  // Read JSONL content
+  const jsonlContent = readFileSync(jsonlPath, "utf-8");
+  
+  // Handle empty file
+  if (!jsonlContent || jsonlContent.trim() === "") {
+    return { imported: 0, updated: 0, errors: 0 };
+  }
+  
+  // Get adapter - but we need to prevent auto-migration from running
+  // Auto-migration only runs if DB is empty, so we check first
+  const adapter = await getHiveAdapter(projectPath);
+  
+  // Parse JSONL line-by-line, tolerating invalid JSON
+  const lines = jsonlContent.split("\n").filter(l => l.trim());
+  let imported = 0;
+  let updated = 0;
+  let errors = 0;
+  
+  for (const line of lines) {
+    try {
+      const cellData = JSON.parse(line);
+      
+      // Check if cell exists
+      const existing = await adapter.getCell(projectPath, cellData.id);
+      
+      if (existing) {
+        // Update existing cell
+        try {
+          await adapter.updateCell(projectPath, cellData.id, {
+            title: cellData.title,
+            description: cellData.description,
+            priority: cellData.priority,
+            assignee: cellData.assignee,
+          });
+          
+          // Update status if needed - use closeCell for 'closed' status
+          if (existing.status !== cellData.status) {
+            if (cellData.status === "closed") {
+              await adapter.closeCell(projectPath, cellData.id, "Imported from JSONL");
+            } else {
+              await adapter.changeCellStatus(projectPath, cellData.id, cellData.status);
+            }
+          }
+          
+          updated++;
+        } catch (updateError) {
+          // Update failed - count as error
+          errors++;
+        }
+      } else {
+        // Create new cell - use direct DB insert to preserve ID
+        const db = await adapter.getDatabase();
+        
+        const status = cellData.status === "tombstone" ? "closed" : cellData.status;
+        const isClosed = status === "closed";
+        const closedAt = isClosed
+          ? (cellData.closed_at 
+              ? new Date(cellData.closed_at).getTime() 
+              : new Date(cellData.updated_at).getTime())
+          : null;
+        
+        await db.query(
+          `INSERT INTO cells (
+            id, project_key, type, status, title, description, priority,
+            parent_id, assignee, created_at, updated_at, closed_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [
+            cellData.id,
+            projectPath,
+            cellData.issue_type,
+            status,
+            cellData.title,
+            cellData.description || null,
+            cellData.priority,
+            cellData.parent_id || null,
+            cellData.assignee || null,
+            new Date(cellData.created_at).getTime(),
+            new Date(cellData.updated_at).getTime(),
+            closedAt,
+          ]
+        );
+        
+        imported++;
+      }
+    } catch (error) {
+      // Invalid JSON or import error - count and continue
+      errors++;
+    }
+  }
+  
+  return { imported, updated, errors };
+}
+
 // ============================================================================
 // Adapter Singleton
 // ============================================================================

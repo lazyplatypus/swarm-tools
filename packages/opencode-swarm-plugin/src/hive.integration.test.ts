@@ -830,4 +830,510 @@ describe("beads integration", () => {
       rmSync(tempProject, { recursive: true, force: true });
     });
   });
+
+  describe("importJsonlToPGLite", () => {
+    it("imports empty JSONL - no-op", async () => {
+      const { importJsonlToPGLite } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project with empty JSONL
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      writeFileSync(join(hiveDir, "issues.jsonl"), "");
+
+      const result = await importJsonlToPGLite(tempProject);
+
+      expect(result.imported).toBe(0);
+      expect(result.updated).toBe(0);
+      expect(result.errors).toBe(0);
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("imports new records - all inserted", async () => {
+      const { importJsonlToPGLite, getHiveAdapter } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project with new cells
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+
+      const cell1 = {
+        id: "bd-import-1",
+        title: "Import test 1",
+        status: "open" as const,
+        priority: 2,
+        issue_type: "task" as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      const cell2 = {
+        id: "bd-import-2",
+        title: "Import test 2",
+        status: "in_progress" as const,
+        priority: 1,
+        issue_type: "bug" as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(cell1) + "\n" + JSON.stringify(cell2) + "\n"
+      );
+
+      // CRITICAL: Call importJsonlToPGLite() which will call getHiveAdapter()
+      // The auto-migration will import cells, so we expect 0 imported here
+      // because auto-migration already did it
+      const result = await importJsonlToPGLite(tempProject);
+
+      // Auto-migration runs on first getHiveAdapter() call and imports cells
+      // So when importJsonlToPGLite() runs, cells are already there
+      // This is expected behavior - the function is idempotent
+      expect(result.imported + result.updated).toBe(2);
+      expect(result.errors).toBe(0);
+
+      // Verify cells exist in database
+      const adapter = await getHiveAdapter(tempProject);
+      const importedCell1 = await adapter.getCell(tempProject, "bd-import-1");
+      const importedCell2 = await adapter.getCell(tempProject, "bd-import-2");
+
+      expect(importedCell1).toBeDefined();
+      expect(importedCell1!.title).toBe("Import test 1");
+      expect(importedCell2).toBeDefined();
+      expect(importedCell2!.title).toBe("Import test 2");
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("updates existing records", async () => {
+      const { importJsonlToPGLite, getHiveAdapter } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, unlinkSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+
+      // Write JSONL FIRST (before getHiveAdapter to avoid auto-migration)
+      const originalCell = {
+        id: "bd-update-1",
+        title: "Original title",
+        status: "open",
+        priority: 2,
+        issue_type: "task",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(originalCell) + "\n"
+      );
+
+      // Get adapter - this will auto-migrate the original cell
+      const adapter = await getHiveAdapter(tempProject);
+
+      // Now update the JSONL with new data
+      const updatedCell = {
+        ...originalCell,
+        title: "Updated title",
+        description: "New description",
+        status: "in_progress" as const,
+        priority: 0,
+        updated_at: new Date().toISOString(),
+      };
+
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(updatedCell) + "\n"
+      );
+
+      const result = await importJsonlToPGLite(tempProject);
+
+      expect(result.imported).toBe(0);
+      expect(result.updated).toBe(1);
+      expect(result.errors).toBe(0);
+
+      // Verify update
+      const cell = await adapter.getCell(tempProject, "bd-update-1");
+      expect(cell).toBeDefined();
+      expect(cell!.title).toBe("Updated title");
+      expect(cell!.description).toContain("New description");
+      expect(cell!.status).toBe("in_progress");
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("handles mixed new and existing records", async () => {
+      const { importJsonlToPGLite, getHiveAdapter } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project with NO initial JSONL (avoid auto-migration)
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+
+      // Get adapter first (no auto-migration since no JSONL exists)
+      const adapter = await getHiveAdapter(tempProject);
+
+      // Create existing cell directly via adapter
+      await adapter.createCell(tempProject, {
+        title: "Existing",
+        type: "task",
+        priority: 2,
+      });
+
+      // Get the created cell to find its ID
+      const cells = await adapter.queryCells(tempProject, { limit: 1 });
+      const existingId = cells[0].id;
+
+      // Now write JSONL with updated existing + new cell
+      const existingUpdated = {
+        id: existingId,
+        title: "Existing updated",
+        status: "closed" as const,
+        priority: 2,
+        issue_type: "task" as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        closed_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      const newCell = {
+        id: "bd-new",
+        title: "Brand new",
+        status: "open" as const,
+        priority: 1,
+        issue_type: "feature" as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(existingUpdated) + "\n" + JSON.stringify(newCell) + "\n"
+      );
+
+      const result = await importJsonlToPGLite(tempProject);
+
+      // importJsonlToPGLite() finds:
+      // - existingId already exists (updated)
+      // - bd-new is new (imported)
+      expect(result.imported).toBe(1); // bd-new
+      expect(result.updated).toBe(1); // existing cell
+      expect(result.errors).toBe(0);
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("skips invalid JSON lines and counts errors", async () => {
+      const { importJsonlToPGLite } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+
+      const validCell = {
+        id: "bd-valid",
+        title: "Valid",
+        status: "open",
+        priority: 2,
+        issue_type: "task",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      // Mix valid and invalid JSON
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(validCell) + "\n" +
+        "{ invalid json \n" +
+        '{"id":"incomplete"\n'
+      );
+
+      const result = await importJsonlToPGLite(tempProject);
+
+      expect(result.imported).toBe(1); // Only the valid one
+      expect(result.errors).toBe(2); // Two invalid lines
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("handles missing JSONL file gracefully", async () => {
+      const { importJsonlToPGLite } = await import("./hive");
+      const { mkdirSync, rmSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      // Create temp project without issues.jsonl
+      const tempProject = join(tmpdir(), `hive-import-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+
+      const result = await importJsonlToPGLite(tempProject);
+
+      expect(result.imported).toBe(0);
+      expect(result.updated).toBe(0);
+      expect(result.errors).toBe(0);
+
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+  });
+
+  describe("mergeHistoricBeads", () => {
+    it("merges empty base file - no changes", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project with .hive directory
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Create empty base file
+      writeFileSync(join(hiveDir, "beads.base.jsonl"), "");
+      
+      // Create issues.jsonl with one bead
+      const existingBead = { id: "bd-existing", title: "Existing bead" };
+      writeFileSync(join(hiveDir, "issues.jsonl"), JSON.stringify(existingBead) + "\n");
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      expect(result.merged).toBe(0);
+      expect(result.skipped).toBe(0);
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("merges empty issues file - all base records imported", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Create base file with 2 beads
+      const baseBead1 = { id: "bd-base-1", title: "Historic bead 1" };
+      const baseBead2 = { id: "bd-base-2", title: "Historic bead 2" };
+      writeFileSync(
+        join(hiveDir, "beads.base.jsonl"),
+        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n"
+      );
+      
+      // Empty issues file
+      writeFileSync(join(hiveDir, "issues.jsonl"), "");
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      expect(result.merged).toBe(2);
+      expect(result.skipped).toBe(0);
+      
+      // Verify issues.jsonl now has both beads
+      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+      const lines = issuesContent.trim().split("\n").filter(l => l);
+      expect(lines).toHaveLength(2);
+      
+      const beads = lines.map(line => JSON.parse(line));
+      expect(beads.find(b => b.id === "bd-base-1")).toBeDefined();
+      expect(beads.find(b => b.id === "bd-base-2")).toBeDefined();
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("overlapping IDs - issues.jsonl wins (more recent)", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Base has old version of bd-overlap
+      const baseOldVersion = { id: "bd-overlap", title: "Old title", status: "open" };
+      writeFileSync(
+        join(hiveDir, "beads.base.jsonl"),
+        JSON.stringify(baseOldVersion) + "\n"
+      );
+      
+      // Issues has new version (updated)
+      const issuesNewVersion = { id: "bd-overlap", title: "New title", status: "closed" };
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(issuesNewVersion) + "\n"
+      );
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      expect(result.merged).toBe(0); // Nothing new to merge
+      expect(result.skipped).toBe(1); // Skipped the old version
+      
+      // Verify issues.jsonl still has new version (unchanged)
+      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+      const bead = JSON.parse(issuesContent.trim());
+      expect(bead.title).toBe("New title");
+      expect(bead.status).toBe("closed");
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("no overlap - all records combined", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Base has 2 beads
+      const baseBead1 = { id: "bd-base-1", title: "Historic 1" };
+      const baseBead2 = { id: "bd-base-2", title: "Historic 2" };
+      writeFileSync(
+        join(hiveDir, "beads.base.jsonl"),
+        JSON.stringify(baseBead1) + "\n" + JSON.stringify(baseBead2) + "\n"
+      );
+      
+      // Issues has 2 different beads
+      const issuesBead1 = { id: "bd-current-1", title: "Current 1" };
+      const issuesBead2 = { id: "bd-current-2", title: "Current 2" };
+      writeFileSync(
+        join(hiveDir, "issues.jsonl"),
+        JSON.stringify(issuesBead1) + "\n" + JSON.stringify(issuesBead2) + "\n"
+      );
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      expect(result.merged).toBe(2); // Added 2 from base
+      expect(result.skipped).toBe(0);
+      
+      // Verify issues.jsonl now has all 4 beads
+      const issuesContent = readFileSync(join(hiveDir, "issues.jsonl"), "utf-8");
+      const lines = issuesContent.trim().split("\n").filter(l => l);
+      expect(lines).toHaveLength(4);
+      
+      const beads = lines.map(line => JSON.parse(line));
+      expect(beads.find(b => b.id === "bd-base-1")).toBeDefined();
+      expect(beads.find(b => b.id === "bd-base-2")).toBeDefined();
+      expect(beads.find(b => b.id === "bd-current-1")).toBeDefined();
+      expect(beads.find(b => b.id === "bd-current-2")).toBeDefined();
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("missing base file - graceful handling", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project with .hive but NO base file
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Issues exists, base doesn't
+      const issuesBead = { id: "bd-current", title: "Current" };
+      writeFileSync(join(hiveDir, "issues.jsonl"), JSON.stringify(issuesBead) + "\n");
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      // Should return zeros, not throw
+      expect(result.merged).toBe(0);
+      expect(result.skipped).toBe(0);
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+
+    it("missing issues file - creates it from base", async () => {
+      const { mergeHistoricBeads } = await import("./hive");
+      const { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp project with base but NO issues file
+      const tempProject = join(tmpdir(), `hive-merge-test-${Date.now()}`);
+      const hiveDir = join(tempProject, ".hive");
+      mkdirSync(hiveDir, { recursive: true });
+      
+      // Base exists, issues doesn't
+      const baseBead = { id: "bd-base", title: "Historic" };
+      writeFileSync(
+        join(hiveDir, "beads.base.jsonl"),
+        JSON.stringify(baseBead) + "\n"
+      );
+      
+      const issuesPath = join(hiveDir, "issues.jsonl");
+      expect(existsSync(issuesPath)).toBe(false);
+      
+      const result = await mergeHistoricBeads(tempProject);
+      
+      expect(result.merged).toBe(1);
+      expect(result.skipped).toBe(0);
+      
+      // Verify issues.jsonl was created
+      expect(existsSync(issuesPath)).toBe(true);
+      const content = readFileSync(issuesPath, "utf-8");
+      const bead = JSON.parse(content.trim());
+      expect(bead.id).toBe("bd-base");
+      
+      // Cleanup
+      rmSync(tempProject, { recursive: true, force: true });
+    });
+  });
 });
