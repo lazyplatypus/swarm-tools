@@ -484,8 +484,10 @@ See the [Swarm Mail Architecture](packages/opencode-swarm-plugin/docs/swarm-mail
 | Required                                     | Optional                                                                                      |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | [OpenCode](https://opencode.ai)              | [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) - historical context |
-| [Beads](https://github.com/steveyegge/beads) | [UBS](https://github.com/Dicklesworthstone/ultimate_bug_scanner) - bug scanning               |
-|                                              | [semantic-memory](https://github.com/joelhooks/semantic-memory) - learning persistence        |
+|                                              | [UBS](https://github.com/Dicklesworthstone/ultimate_bug_scanner) - bug scanning               |
+|                                              | [Ollama](https://ollama.ai) - local embeddings for semantic memory (embedded in plugin)       |
+
+> **Note:** Semantic memory is now embedded in the plugin. Install Ollama for vector search, or it falls back to full-text search.
 
 Run `swarm doctor` to check status.
 

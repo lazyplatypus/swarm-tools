@@ -220,7 +220,8 @@ These tools significantly enhance the swarm experience:
 |------|---------|---------|
 | [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context - queries past sessions for similar decompositions | See below |
 | [UBS](https://github.com/Dicklesworthstone/ultimate_bug_scanner) | Bug scanning - runs on subtask completion to catch issues | See below |
-| [semantic-memory](https://github.com/joelhooks/semantic-memory) | Learning persistence - stores patterns across sessions | Requires Ollama (see above) |
+
+> **Note:** Semantic memory is now embedded in the plugin. No separate installation needed - just install Ollama for vector embeddings.
 
 #### Installing CASS
 
@@ -243,15 +244,11 @@ cd ultimate_bug_scanner
 pip install -e .
 ```
 
-#### Installing semantic-memory
-
-The `semantic-memory_check` tool verifies Ollama is ready (see installation steps above).
-
 **Why install these?**
 
 - **CASS** - When you run `/swarm "Add OAuth"`, the coordinator queries CASS for similar past tasks. Without it, decomposition is based only on the current task description.
 - **UBS** - Every `swarm_complete` runs UBS to scan for bugs. Without it, you lose automatic bug detection.
-- **semantic-memory** - Pattern maturity and anti-pattern detection persist across sessions. Without it, learning resets each session.
+- **Ollama** - Enables vector similarity search for semantic memory. Without it, memory falls back to full-text search (still functional, less semantic).
 
 Run `swarm doctor` to check which dependencies are installed.
 
