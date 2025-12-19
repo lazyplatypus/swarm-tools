@@ -38,3 +38,46 @@ Cell IDs got long. Now you can use just the hash portion.
 
 > "The best interface is no interface" - Golden Krishna
 > (But if you must have one, make it forgive typos)
+
+---
+
+## Auto-Sync at Key Events
+
+```
+┌─────────────────────────────────────────┐
+│  hive_create_epic  →  auto-sync         │
+│  swarm_complete    →  auto-sync         │
+│  process.exit      →  safety net sync   │
+└─────────────────────────────────────────┘
+```
+
+Cells no longer get lost when processes exit unexpectedly.
+
+**What changed:**
+- `hive_create_epic` syncs after creating epic + subtasks (workers can see them immediately)
+- `swarm_complete` syncs before worker exits (completed work persists)
+- `process.on('beforeExit')` hook catches any remaining dirty cells
+
+**Why it matters:**
+- Spawned workers couldn't see cells created by coordinator (race condition)
+- Worker crashes could lose completed work
+- Now the lazy-write pattern has strategic checkpoints
+
+---
+
+## Removed Arbitrary Subtask Limits
+
+```
+BEFORE: max_subtasks capped at 10 (why tho?)
+AFTER:  no limit - LLM decides based on task complexity
+```
+
+**What changed:**
+- Removed `.max(10)` from `swarm_decompose` and `swarm_plan_prompt`
+- `max_subtasks` is now optional with no default
+- Prompt says "as many as needed" instead of "2-10"
+
+**Why it matters:**
+- Complex epics need more than 10 subtasks
+- Arbitrary limits force awkward decomposition
+- Trust the coordinator to make good decisions
