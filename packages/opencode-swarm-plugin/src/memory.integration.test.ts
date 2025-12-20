@@ -35,7 +35,7 @@ import { createMemoryAdapter, resetMigrationCheck } from "./memory";
 async function createMemorySchema(adapter: DatabaseAdapter): Promise<void> {
 	// Create memories table with vector column
 	await adapter.query(`
-		CREATE TABLE memories (
+		CREATE TABLE IF NOT EXISTS memories (
 			id TEXT PRIMARY KEY,
 			content TEXT NOT NULL,
 			metadata TEXT DEFAULT '{}',
@@ -48,14 +48,21 @@ async function createMemorySchema(adapter: DatabaseAdapter): Promise<void> {
 		)
 	`);
 	
-	// Create FTS5 virtual table for full-text search
-	await adapter.query(`
-		CREATE VIRTUAL TABLE memories_fts USING fts5(
-			content,
-			content='memories',
-			content_rowid='rowid'
-		)
-	`);
+	// Create FTS5 virtual table for full-text search (skip if exists)
+	try {
+		await adapter.query(`
+			CREATE VIRTUAL TABLE memories_fts USING fts5(
+				content,
+				content='memories',
+				content_rowid='rowid'
+			)
+		`);
+	} catch (e) {
+		// Ignore "table already exists" error
+		if (!(e instanceof Error && e.message.includes("already exists"))) {
+			throw e;
+		}
+	}
 	
 	// Create triggers to keep FTS in sync
 	await adapter.query(`
@@ -131,13 +138,14 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should auto-migrate when legacy exists and target is empty", async () => {
 		// Setup: Create target DB with proper schema
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema (includes test marker to skip auto-migration)
-		await createMemorySchema(targetDb);
+		// Insert test marker to skip auto-migration
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
-		// Verify target has memories (marker inserted by createMemorySchema)
+		// Verify target has memories (marker inserted)
 		const countBefore = await targetDb.query<{ count: string }>(
 			"SELECT COUNT(*) as count FROM memories",
 		);
@@ -156,11 +164,12 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should skip migration when target already has memories", async () => {
 		// Setup: Create target DB with existing memory
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema (includes test marker)
-		await createMemorySchema(targetDb);
+		// Insert test marker
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 		
 		await insertTestMemory(targetDb, "mem_existing", "Existing memory in target");
 
@@ -187,13 +196,14 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should skip migration when no legacy DB exists OR target has memories", async () => {
 		// Setup: Create target DB (empty)
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema (includes test marker to skip auto-migration)
-		await createMemorySchema(targetDb);
+		// Insert test marker to skip auto-migration
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
-		// Verify target has marker memory (inserted by createMemorySchema)
+		// Verify target has marker memory
 		const countBefore = await targetDb.query<{ count: string }>(
 			"SELECT COUNT(*) as count FROM memories",
 		);
@@ -218,11 +228,12 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should only check migration once (module-level flag)", async () => {
 		// Setup: Create target DB
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema
-		await createMemorySchema(targetDb);
+		// Insert test marker
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
 		// First call - migration check runs (may or may not migrate depending on legacy DB)
 		const adapter1 = await createMemoryAdapter(targetDb);
@@ -245,11 +256,12 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should reset migration check flag when explicitly called", async () => {
 		// Setup: Create target DB
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema
-		await createMemorySchema(targetDb);
+		// Insert test marker
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
 		// First call
 		const adapter1 = await createMemoryAdapter(targetDb);
@@ -272,11 +284,12 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should handle migration errors gracefully (no throw)", async () => {
 		// Setup: Create target DB
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema
-		await createMemorySchema(targetDb);
+		// Insert test marker
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
 		// Action: Call createMemoryAdapter
 		// Even if migration fails internally, it should not throw
@@ -291,11 +304,12 @@ describe("Memory Auto-Migration Integration", () => {
 
 	it("should create functional adapter after migration", async () => {
 		// Setup: Create target DB
+		// Note: createInMemorySwarmMail now creates memory schema automatically
 		targetSwarmMail = await createInMemorySwarmMail("target-test");
 		const targetDb = await targetSwarmMail.getDatabase();
 		
-		// Create memory schema
-		await createMemorySchema(targetDb);
+		// Insert test marker
+		await insertTestMemory(targetDb, "mem_test_init", "Test setup marker");
 
 		// Action: Create adapter
 		const adapter = await createMemoryAdapter(targetDb);

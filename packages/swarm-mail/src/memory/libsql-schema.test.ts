@@ -41,8 +41,10 @@ describe("libSQL Memory Schema", () => {
     expect(columns).toContainEqual({ name: "content", type: "TEXT" });
     expect(columns).toContainEqual({ name: "metadata", type: "TEXT" }); // JSON stored as TEXT in SQLite
     expect(columns).toContainEqual({ name: "collection", type: "TEXT" });
+    expect(columns).toContainEqual({ name: "tags", type: "TEXT" }); // JSON array stored as TEXT
     expect(columns).toContainEqual({ name: "created_at", type: "TEXT" }); // DATETIME stored as TEXT
-    expect(columns).toContainEqual({ name: "confidence", type: "REAL" });
+    expect(columns).toContainEqual({ name: "updated_at", type: "TEXT" }); // DATETIME stored as TEXT
+    expect(columns).toContainEqual({ name: "decay_factor", type: "REAL" });
     expect(columns).toContainEqual({ name: "embedding", type: `F32_BLOB(${EMBEDDING_DIM})` });
   });
 
@@ -104,7 +106,7 @@ describe("libSQL Memory Schema", () => {
     // Insert memory with vector
     await db.execute({
       sql: `
-        INSERT INTO memories (id, content, metadata, collection, created_at, confidence, embedding)
+        INSERT INTO memories (id, content, metadata, collection, created_at, decay_factor, embedding)
         VALUES (?, ?, ?, ?, ?, ?, vector(?))
       `,
       args: [
@@ -113,7 +115,7 @@ describe("libSQL Memory Schema", () => {
         JSON.stringify({ tags: ["test"] }),
         "default",
         new Date().toISOString(),
-        0.7,
+        1.0,
         JSON.stringify(embedding),
       ],
     });
@@ -208,7 +210,7 @@ describe("libSQL Memory Schema", () => {
     expect(stored).toEqual(metadata);
   });
 
-  test("confidence defaults to 0.7", async () => {
+  test("decay_factor defaults to 1.0", async () => {
     const db = createClient({ url: ":memory:" });
     
     await createLibSQLMemorySchema(db);
@@ -218,8 +220,8 @@ describe("libSQL Memory Schema", () => {
       args: ["mem-1", "Test content"],
     });
 
-    const result = await db.execute("SELECT confidence FROM memories WHERE id = ?", ["mem-1"]);
-    expect(Number(result.rows[0].confidence)).toBe(0.7);
+    const result = await db.execute("SELECT decay_factor FROM memories WHERE id = ?", ["mem-1"]);
+    expect(Number(result.rows[0].decay_factor)).toBe(1.0);
   });
 
   test("collection defaults to 'default'", async () => {

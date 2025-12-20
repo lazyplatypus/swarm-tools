@@ -60,8 +60,10 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
       content TEXT NOT NULL,
       metadata TEXT DEFAULT '{}',
       collection TEXT DEFAULT 'default',
+      tags TEXT DEFAULT '[]',
       created_at TEXT DEFAULT (datetime('now')),
-      confidence REAL DEFAULT 0.7,
+      updated_at TEXT DEFAULT (datetime('now')),
+      decay_factor REAL DEFAULT 1.0,
       embedding F32_BLOB(${EMBEDDING_DIM})
     )
   `);
@@ -179,7 +181,7 @@ export async function validateLibSQLMemorySchema(db: Client): Promise<boolean> {
       SELECT name FROM pragma_table_info('memories')
     `);
     const columnNames = columns.rows.map((r) => r.name);
-    const required = ["id", "content", "metadata", "collection", "created_at", "confidence", "embedding"];
+    const required = ["id", "content", "metadata", "collection", "tags", "created_at", "updated_at", "decay_factor", "embedding"];
     
     for (const col of required) {
       if (!columnNames.includes(col)) return false;

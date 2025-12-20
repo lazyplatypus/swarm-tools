@@ -30,6 +30,7 @@ import { createSwarmMailAdapter } from "./adapter.js";
 import { createDrizzleClient } from "./db/drizzle.js";
 import type { SwarmDb } from "./db/client.js";
 import { createLibSQLAdapter } from "./libsql.js";
+import { createLibSQLMemorySchema } from "./memory/libsql-schema.js";
 import { createLibSQLStreamsSchema } from "./streams/libsql-schema.js";
 import type { SwarmMailAdapter } from "./types/adapter.js";
 import type { DatabaseAdapter } from "./types/database.js";
@@ -141,8 +142,10 @@ export async function getSwarmMailLibSQL(
   const dbPath = getDatabasePath(projectPath);
   const db = await createLibSQLAdapter({ url: dbPath });
 
-  // Initialize schema
+  // Initialize schemas
   await createLibSQLStreamsSchema(db);
+  // Cast to access getClient() - we know this is a LibSQLAdapter
+  await createLibSQLMemorySchema((db as any).getClient());
 
   const projectKey = projectPath || "global";
   const adapter = createSwarmMailAdapter(db, projectKey);
@@ -174,8 +177,10 @@ export async function createInMemorySwarmMailLibSQL(
 ): Promise<SwarmMailAdapter> {
   const db = await createLibSQLAdapter({ url: ":memory:" });
 
-  // Initialize schema
+  // Initialize schemas
   await createLibSQLStreamsSchema(db);
+  // Cast to access getClient() - we know this is a LibSQLAdapter
+  await createLibSQLMemorySchema((db as any).getClient());
 
   return createSwarmMailAdapter(db, `test-${testId}`);
 }

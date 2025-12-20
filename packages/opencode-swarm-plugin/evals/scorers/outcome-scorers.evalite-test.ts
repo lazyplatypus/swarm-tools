@@ -4,7 +4,7 @@
  * Tests the 5 new outcome-based scorers by verifying their exports.
  * Full functional testing happens via Evalite integration.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 
 describe("Outcome Scorers", () => {
   it("exports all 5 outcome scorers from outcome-scorers.ts", async () => {

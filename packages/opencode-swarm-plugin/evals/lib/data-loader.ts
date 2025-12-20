@@ -8,7 +8,7 @@ import {
   getEvalRecords,
   getEvalStats,
   type EvalRecord,
-} from "../../src/streams/projections.js";
+} from "swarm-mail";
 
 export interface EvalCase {
   input: { task: string; context?: string };

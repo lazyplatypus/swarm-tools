@@ -10,12 +10,13 @@ import {
   hasRealEvalData,
   getEvalDataSummary,
 } from "./data-loader.js";
-import { appendEvent } from "../../src/streams/store.js";
-import { getDatabase, closeDatabase } from "../../src/streams/index.js";
-import type {
-  DecompositionGeneratedEvent,
-  SubtaskOutcomeEvent,
-} from "../../src/streams/events.js";
+import {
+  appendEvent,
+  getDatabase,
+  closeDatabase,
+  type DecompositionGeneratedEvent,
+  type SubtaskOutcomeEvent,
+} from "swarm-mail";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";

@@ -53,6 +53,7 @@ export {
   createInMemorySwarmMailLibSQL as createInMemorySwarmMail, // Alias for backward compatibility
   closeSwarmMailLibSQL,
   closeAllSwarmMailLibSQL,
+  closeAllSwarmMailLibSQL as closeAllSwarmMail, // Alias for backward compatibility
   getDatabasePath as getLibSQLDatabasePath,
   getProjectTempDirName as getLibSQLProjectTempDirName,
   hashProjectPath as hashLibSQLProjectPath,
@@ -92,13 +93,23 @@ export {
 
 // Event types and creation (from events.ts)
 export { createEvent } from "./streams/events";
-export type { MailSessionState } from "./streams/events";
+export type {
+  MailSessionState,
+  DecompositionGeneratedEvent,
+  SubtaskOutcomeEvent,
+} from "./streams/events";
 
 // Event store primitives (from store.ts)
 export { appendEvent, readEvents } from "./streams/store";
 
 // Projections (from projections.ts)
-export { getAgent, getActiveReservations } from "./streams/projections";
+export {
+  getAgent,
+  getActiveReservations,
+  getEvalRecords,
+  getEvalStats,
+} from "./streams/projections";
+export type { EvalRecord } from "./streams/projections";
 
 // Database management - LAZY LOADED via dynamic import to avoid WASM loading
 // Users should call these functions, not import PGlite directly
@@ -115,6 +126,11 @@ export async function closeDatabase(projectPath?: string) {
 export async function closeAllDatabases() {
   const { closeAllDatabases: closeAll } = await import("./streams/index.js");
   return closeAll();
+}
+
+export async function resetDatabase(projectPath?: string) {
+  const { resetDatabase: reset } = await import("./streams/index.js");
+  return reset(projectPath);
 }
 
 // Re-export checkSwarmHealth from correct location

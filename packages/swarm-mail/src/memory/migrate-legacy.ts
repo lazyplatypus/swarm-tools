@@ -96,10 +96,18 @@ export function getDefaultLegacyPath(): string {
 
 /**
  * Check if legacy database exists
+ * 
+ * Checks for the presence of PGLite data files (PG_VERSION file)
+ * to distinguish between an empty directory and an actual database.
  */
 export function legacyDatabaseExists(path?: string): boolean {
   const dbPath = path || getDefaultLegacyPath();
-  return existsSync(dbPath);
+  if (!existsSync(dbPath)) {
+    return false;
+  }
+  // Check for PGLite's PG_VERSION file which indicates an actual database
+  const pgVersionPath = join(dbPath, "PG_VERSION");
+  return existsSync(pgVersionPath);
 }
 
 /**
