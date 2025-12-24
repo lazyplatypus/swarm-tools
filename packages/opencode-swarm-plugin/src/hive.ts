@@ -1093,6 +1093,94 @@ export const hive_ready = tool({
 });
 
 /**
+ * Query cells from the hive database with flexible filtering
+ */
+export const hive_cells = tool({
+  description: `Query cells from the hive database with flexible filtering.
+
+USE THIS TOOL TO:
+- List all open cells: hive_cells()
+- Find cells by status: hive_cells({ status: "in_progress" })
+- Find cells by type: hive_cells({ type: "bug" })
+- Get a specific cell by partial ID: hive_cells({ id: "mjkmd" })
+- Get the next ready (unblocked) cell: hive_cells({ ready: true })
+- Combine filters: hive_cells({ status: "open", type: "task" })
+
+RETURNS: Array of cells with id, title, status, priority, type, parent_id, created_at, updated_at
+
+PREFER THIS OVER hive_query when you need to:
+- See what work is available
+- Check status of multiple cells
+- Find cells matching criteria
+- Look up a cell by partial ID`,
+  args: {
+    id: tool.schema.string().optional().describe("Partial or full cell ID to look up"),
+    status: tool.schema.enum(["open", "in_progress", "blocked", "closed"]).optional().describe("Filter by status"),
+    type: tool.schema.enum(["task", "bug", "feature", "epic", "chore"]).optional().describe("Filter by type"),
+    ready: tool.schema.boolean().optional().describe("If true, return only the next unblocked cell"),
+    limit: tool.schema.number().optional().describe("Max cells to return (default 20)"),
+  },
+  async execute(args, ctx) {
+    const projectKey = getHiveWorkingDirectory();
+    const adapter = await getHiveAdapter(projectKey);
+    
+    try {
+      // If specific ID requested, resolve and return single cell
+      if (args.id) {
+        const fullId = await resolvePartialId(adapter, projectKey, args.id) || args.id;
+        const cell = await adapter.getCell(projectKey, fullId);
+        if (!cell) {
+          throw new HiveError(`No cell found matching ID '${args.id}'`, "hive_cells");
+        }
+        const formatted = formatCellForOutput(cell);
+        return JSON.stringify([formatted], null, 2);
+      }
+      
+      // If ready flag, return next unblocked cell
+      if (args.ready) {
+        const ready = await adapter.getNextReadyCell(projectKey);
+        if (!ready) {
+          return JSON.stringify([], null, 2);
+        }
+        const formatted = formatCellForOutput(ready);
+        return JSON.stringify([formatted], null, 2);
+      }
+      
+      // Query with filters
+      const cells = await adapter.queryCells(projectKey, {
+        status: args.status,
+        type: args.type,
+        limit: args.limit || 20,
+      });
+      
+      const formatted = cells.map(c => formatCellForOutput(c));
+      return JSON.stringify(formatted, null, 2);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      
+      // Provide helpful error messages
+      if (message.includes("Ambiguous hash")) {
+        throw new HiveError(
+          `Ambiguous ID '${args.id}': multiple cells match. Please provide more characters.`,
+          "hive_cells",
+        );
+      }
+      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+        throw new HiveError(
+          `No cell found matching ID '${args.id || "unknown"}'`,
+          "hive_cells",
+        );
+      }
+      
+      throw new HiveError(
+        `Failed to query cells: ${message}`,
+        "hive_cells",
+      );
+    }
+  },
+});
+
+/**
  * Sync hive to git and push
  */
 export const hive_sync = tool({
@@ -1345,6 +1433,7 @@ export const hiveTools = {
   hive_close,
   hive_start,
   hive_ready,
+  hive_cells,
   hive_sync,
   hive_link_thread,
 };

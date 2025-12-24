@@ -197,6 +197,112 @@ READ-ONLY research agent. Never modifies code - only gathers intel and stores fi
 // Log Command Tests (TDD)
 // ============================================================================
 
+// ============================================================================
+// Cells Command Tests (TDD)
+// ============================================================================
+
+/**
+ * Format cells as table output
+ */
+function formatCellsTable(cells: Array<{
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+}>): string {
+  if (cells.length === 0) {
+    return "No cells found";
+  }
+
+  const rows = cells.map(c => ({
+    id: c.id,
+    title: c.title.length > 50 ? c.title.slice(0, 47) + "..." : c.title,
+    status: c.status,
+    priority: String(c.priority),
+  }));
+
+  // Calculate column widths
+  const widths = {
+    id: Math.max(2, ...rows.map(r => r.id.length)),
+    title: Math.max(5, ...rows.map(r => r.title.length)),
+    status: Math.max(6, ...rows.map(r => r.status.length)),
+    priority: Math.max(8, ...rows.map(r => r.priority.length)),
+  };
+
+  // Build header
+  const header = [
+    "ID".padEnd(widths.id),
+    "TITLE".padEnd(widths.title),
+    "STATUS".padEnd(widths.status),
+    "PRIORITY".padEnd(widths.priority),
+  ].join("  ");
+
+  const separator = "-".repeat(header.length);
+
+  // Build rows
+  const bodyRows = rows.map(r =>
+    [
+      r.id.padEnd(widths.id),
+      r.title.padEnd(widths.title),
+      r.status.padEnd(widths.status),
+      r.priority.padEnd(widths.priority),
+    ].join("  ")
+  );
+
+  return [header, separator, ...bodyRows].join("\n");
+}
+
+describe("Cells command", () => {
+  describe("formatCellsTable", () => {
+    test("formats cells as table with id, title, status, priority", () => {
+      const cells = [
+        {
+          id: "test-abc123-xyz",
+          title: "Fix bug",
+          status: "open",
+          priority: 0,
+          type: "bug",
+          created_at: 1234567890,
+          updated_at: 1234567890,
+        },
+        {
+          id: "test-def456-abc",
+          title: "Add feature",
+          status: "in_progress",
+          priority: 2,
+          type: "feature",
+          created_at: 1234567890,
+          updated_at: 1234567890,
+        },
+      ];
+
+      const table = formatCellsTable(cells);
+
+      // Should contain headers
+      expect(table).toContain("ID");
+      expect(table).toContain("TITLE");
+      expect(table).toContain("STATUS");
+      expect(table).toContain("PRIORITY");
+
+      // Should contain cell data
+      expect(table).toContain("test-abc123-xyz");
+      expect(table).toContain("Fix bug");
+      expect(table).toContain("open");
+      expect(table).toContain("0");
+
+      expect(table).toContain("test-def456-abc");
+      expect(table).toContain("Add feature");
+      expect(table).toContain("in_progress");
+      expect(table).toContain("2");
+    });
+
+    test("returns 'No cells found' for empty array", () => {
+      const table = formatCellsTable([]);
+      expect(table).toBe("No cells found");
+    });
+  });
+});
+
 describe("Log command helpers", () => {
   let testDir: string;
 

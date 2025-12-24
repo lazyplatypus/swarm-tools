@@ -2,18 +2,15 @@
  * Integration tests for swarm review feedback flow
  * 
  * Tests the coordinator review feedback workflow with real HiveAdapter and swarm-mail.
- * Verifies that review approval/rejection properly updates state and sends messages.
+ * Verifies that review approval/rejection properly updates state.
  * 
- * **STATUS**: URL_INVALID bug FIXED by commit 7bf9385 (libSQL URL normalization).
- * Tests now execute without URL errors. sendSwarmMessage successfully creates adapters.
- *
- * **REMAINING ISSUE**: Message retrieval not working. getInbox returns empty even though
- * sendSwarmMessage succeeds. Possible causes:
- * - Database adapter instance mismatch (sendSwarmMessage creates new adapter each call)
- * - Message projection not materializing from events
- * - Database path resolution issue between send and receive
- *
- * Tests currently SKIPPED pending message retrieval fix.
+ * **ARCHITECTURE**: Coordinator-driven retry pattern (swarm_spawn_retry)
+ * - `approved` status: Sends message to worker (worker can complete)
+ * - `needs_changes` status: NO message sent (worker is dead, coordinator spawns retry)
+ * - After 3 rejections: Task marked blocked, NO message sent
+ * 
+ * This aligns with the "worker is dead" philosophy - failed reviews require coordinator
+ * intervention via swarm_spawn_retry, not worker self-retry.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -195,23 +192,23 @@ describe("swarm_review integration", () => {
 		expect(feedbackParsed.attempt).toBe(1);
 		expect(feedbackParsed.remaining_attempts).toBe(2);
 
-		// Verify retry count incremented
-		expect(feedbackParsed.attempt).toBe(1);
+		// Verify retry_context is provided for coordinator to spawn retry
+		expect(feedbackParsed.retry_context).toBeDefined();
+		expect(feedbackParsed.retry_context.task_id).toBe(subtask.id);
+		expect(feedbackParsed.retry_context.attempt).toBe(1);
+		expect(feedbackParsed.retry_context.max_attempts).toBe(3);
+		expect(feedbackParsed.retry_context.issues).toEqual(issues);
+		expect(feedbackParsed.retry_context.next_action).toContain("swarm_spawn_retry");
 
-		// Verify message was sent with issues
+		// ARCHITECTURE CHANGE: No longer sends message to worker
+		// Worker is considered "dead" - coordinator must spawn retry
+		// Inbox should remain empty
 		const messages = await swarmMail.getInbox(
 			testProjectPath,
 			"TestWorker",
 			{ limit: 10 }
 		);
-		expect(messages.length).toBeGreaterThan(0);
-
-		const needsChangesMessage = messages.find((m) =>
-			m.subject.includes("NEEDS CHANGES")
-		);
-		expect(needsChangesMessage).toBeDefined();
-		expect(needsChangesMessage?.subject).toContain(subtask.id);
-		expect(needsChangesMessage?.subject).toContain("attempt 1/3");
+		expect(messages.length).toBe(0);
 	});
 
 	test("3-strike rule: task marked blocked after 3 rejections", async () => {
@@ -275,16 +272,14 @@ describe("swarm_review integration", () => {
 		const updatedCell = await hive.getCell(testProjectPath, subtask.id);
 		expect(updatedCell?.status).toBe("blocked");
 
-		// Verify final failure message was sent
+		// ARCHITECTURE CHANGE: No longer sends failure message
+		// Worker is dead, coordinator handles escalation
+		// Inbox should remain empty
 		const messages = await swarmMail.getInbox(
 			testProjectPath,
 			"TestWorker",
 			{ limit: 10 }
 		);
-
-		const failedMessage = messages.find((m) => m.subject.includes("FAILED"));
-		expect(failedMessage).toBeDefined();
-		expect(failedMessage?.subject).toContain("max review attempts reached");
-		expect(failedMessage?.importance).toBe("urgent");
+		expect(messages.length).toBe(0);
 	});
 });

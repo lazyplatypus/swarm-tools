@@ -2722,6 +2722,7 @@ ${cyan("Commands:")}
   swarm config    Show paths to generated config files
   swarm agents    Update AGENTS.md with skill awareness
   swarm migrate   Migrate PGlite database to libSQL
+  swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
   swarm log       View swarm logs with filtering
   swarm update    Update to latest version
   swarm version   Show version and banner
@@ -2732,6 +2733,14 @@ ${cyan("Tool Execution:")}
   swarm tool --list                    List all available tools
   swarm tool <name>                    Execute tool with no args
   swarm tool <name> --json '<args>'    Execute tool with JSON args
+
+${cyan("Cell Management:")}
+  swarm cells                          List cells from database (default: 20 most recent)
+  swarm cells <id>                     Get single cell by ID or partial hash
+  swarm cells --status <status>        Filter by status (open, in_progress, closed, blocked)
+  swarm cells --type <type>            Filter by type (task, bug, feature, epic, chore)
+  swarm cells --ready                  Show next ready (unblocked) cell
+  swarm cells --json                   Raw JSON output (array, no wrapper)
 
 ${cyan("Log Viewing:")}
   swarm log                            Tail recent logs (last 50 lines)
@@ -3245,6 +3254,173 @@ function readLogFiles(dir: string): LogEntry[] {
   return entries;
 }
 
+/**
+ * Format cells as table output
+ */
+function formatCellsTable(cells: Array<{
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+}>): string {
+  if (cells.length === 0) {
+    return "No cells found";
+  }
+
+  const rows = cells.map(c => ({
+    id: c.id,
+    title: c.title.length > 50 ? c.title.slice(0, 47) + "..." : c.title,
+    status: c.status,
+    priority: String(c.priority),
+  }));
+
+  // Calculate column widths
+  const widths = {
+    id: Math.max(2, ...rows.map(r => r.id.length)),
+    title: Math.max(5, ...rows.map(r => r.title.length)),
+    status: Math.max(6, ...rows.map(r => r.status.length)),
+    priority: Math.max(8, ...rows.map(r => r.priority.length)),
+  };
+
+  // Build header
+  const header = [
+    "ID".padEnd(widths.id),
+    "TITLE".padEnd(widths.title),
+    "STATUS".padEnd(widths.status),
+    "PRIORITY".padEnd(widths.priority),
+  ].join("  ");
+
+  const separator = "-".repeat(header.length);
+
+  // Build rows
+  const bodyRows = rows.map(r =>
+    [
+      r.id.padEnd(widths.id),
+      r.title.padEnd(widths.title),
+      r.status.padEnd(widths.status),
+      r.priority.padEnd(widths.priority),
+    ].join("  ")
+  );
+
+  return [header, separator, ...bodyRows].join("\n");
+}
+
+/**
+ * List or get cells from database
+ */
+async function cells() {
+  const args = process.argv.slice(3);
+  
+  // Parse arguments
+  let cellId: string | null = null;
+  let statusFilter: string | null = null;
+  let typeFilter: string | null = null;
+  let readyOnly = false;
+  let jsonOutput = false;
+  
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === "--status" && i + 1 < args.length) {
+      statusFilter = args[++i];
+      if (!["open", "in_progress", "closed", "blocked"].includes(statusFilter)) {
+        p.log.error(`Invalid status: ${statusFilter}`);
+        p.log.message(dim("  Valid statuses: open, in_progress, closed, blocked"));
+        process.exit(1);
+      }
+    } else if (arg === "--type" && i + 1 < args.length) {
+      typeFilter = args[++i];
+      if (!["task", "bug", "feature", "epic", "chore"].includes(typeFilter)) {
+        p.log.error(`Invalid type: ${typeFilter}`);
+        p.log.message(dim("  Valid types: task, bug, feature, epic, chore"));
+        process.exit(1);
+      }
+    } else if (arg === "--ready") {
+      readyOnly = true;
+    } else if (arg === "--json") {
+      jsonOutput = true;
+    } else if (!arg.startsWith("--") && !arg.startsWith("-")) {
+      // Positional arg = cell ID (full or partial)
+      cellId = arg;
+    }
+  }
+  
+  // Get adapter using swarm-mail
+  const projectPath = process.cwd();
+  const { getSwarmMailLibSQL, createHiveAdapter, resolvePartialId } = await import("swarm-mail");
+  
+  try {
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase();
+    const adapter = createHiveAdapter(db, projectPath);
+    
+    // Run migrations to ensure schema exists
+    await adapter.runMigrations();
+    
+    // If cell ID provided, get single cell
+    if (cellId) {
+      // Resolve partial ID to full ID
+      const fullId = await resolvePartialId(adapter, projectPath, cellId) || cellId;
+      const cell = await adapter.getCell(projectPath, fullId);
+      
+      if (!cell) {
+        p.log.error(`Cell not found: ${cellId}`);
+        process.exit(1);
+      }
+      
+      if (jsonOutput) {
+        console.log(JSON.stringify([cell], null, 2));
+      } else {
+        const table = formatCellsTable([{
+          id: cell.id,
+          title: cell.title,
+          status: cell.status,
+          priority: cell.priority,
+        }]);
+        console.log(table);
+      }
+      return;
+    }
+    
+    // Otherwise query cells
+    let cells: Array<{ id: string; title: string; status: string; priority: number }>;
+    
+    if (readyOnly) {
+      const readyCell = await adapter.getNextReadyCell(projectPath);
+      cells = readyCell ? [{
+        id: readyCell.id,
+        title: readyCell.title,
+        status: readyCell.status,
+        priority: readyCell.priority,
+      }] : [];
+    } else {
+      const queriedCells = await adapter.queryCells(projectPath, {
+        status: statusFilter as any || undefined,
+        type: typeFilter as any || undefined,
+        limit: 20,
+      });
+      
+      cells = queriedCells.map(c => ({
+        id: c.id,
+        title: c.title,
+        status: c.status,
+        priority: c.priority,
+      }));
+    }
+    
+    if (jsonOutput) {
+      console.log(JSON.stringify(cells, null, 2));
+    } else {
+      const table = formatCellsTable(cells);
+      console.log(table);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    p.log.error(`Failed to query cells: ${message}`);
+    process.exit(1);
+  }
+}
+
 async function logs() {
   const args = process.argv.slice(3);
   
@@ -3613,6 +3789,9 @@ switch (command) {
     break;
   case "db":
     await db();
+    break;
+  case "cells":
+    await cells();
     break;
   case "log":
   case "logs":

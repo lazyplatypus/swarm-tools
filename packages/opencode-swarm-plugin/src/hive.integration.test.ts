@@ -1895,6 +1895,154 @@ describe("beads integration", () => {
     });
   });
 
+  describe("hive_cells", () => {
+    let testCellId: string;
+
+    beforeEach(async () => {
+      // Create a test cell for hive_cells tests
+      const result = await hive_create.execute(
+        { title: "Cells tool test", type: "task" },
+        mockContext,
+      );
+      const cell = parseResponse<Cell>(result);
+      testCellId = cell.id;
+      createdBeadIds.push(testCellId);
+    });
+
+    it("lists all cells with no filters", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      const result = await hive_cells.execute({}, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(Array.isArray(cells)).toBe(true);
+      expect(cells.length).toBeGreaterThan(0);
+    });
+
+    it("filters by status", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      const result = await hive_cells.execute({ status: "open" }, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(Array.isArray(cells)).toBe(true);
+      expect(cells.every((c) => c.status === "open")).toBe(true);
+    });
+
+    it("filters by type", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      // Create a bug cell
+      const bugResult = await hive_create.execute(
+        { title: "Bug for cells test", type: "bug" },
+        mockContext,
+      );
+      const bug = parseResponse<Cell>(bugResult);
+      createdBeadIds.push(bug.id);
+
+      const result = await hive_cells.execute({ type: "bug" }, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(Array.isArray(cells)).toBe(true);
+      expect(cells.every((c) => c.issue_type === "bug")).toBe(true);
+    });
+
+    it("returns next ready cell when ready=true", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      const result = await hive_cells.execute({ ready: true }, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(Array.isArray(cells)).toBe(true);
+      // Should return 0 or 1 cells (the next ready one)
+      expect(cells.length).toBeLessThanOrEqual(1);
+      if (cells.length === 1) {
+        expect(["open", "in_progress"]).toContain(cells[0].status);
+      }
+    });
+
+    it("looks up cell by partial ID", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      // Extract hash from full ID (6-char segment before the last hyphen)
+      const lastHyphenIndex = testCellId.lastIndexOf("-");
+      const beforeLast = testCellId.substring(0, lastHyphenIndex);
+      const secondLastHyphenIndex = beforeLast.lastIndexOf("-");
+      const hash = testCellId.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
+      
+      // Use last 6 chars of hash (or full hash if short)
+      const shortHash = hash.substring(Math.max(0, hash.length - 6));
+
+      try {
+        const result = await hive_cells.execute({ id: shortHash }, mockContext);
+        const cells = parseResponse<Cell[]>(result);
+
+        // Should return exactly one cell matching the ID
+        expect(cells).toHaveLength(1);
+        expect(cells[0].id).toBe(testCellId);
+      } catch (error) {
+        // If ambiguous, verify error message is helpful
+        if (error instanceof Error && error.message.includes("Ambiguous")) {
+          expect(error.message).toMatch(/ambiguous.*multiple/i);
+          expect(error.message).toContain(shortHash);
+        } else {
+          throw error;
+        }
+      }
+    });
+
+    it("looks up cell by full ID", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      const result = await hive_cells.execute({ id: testCellId }, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(cells).toHaveLength(1);
+      expect(cells[0].id).toBe(testCellId);
+      expect(cells[0].title).toBe("Cells tool test");
+    });
+
+    it("throws error for non-existent ID", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      await expect(
+        hive_cells.execute({ id: "nonexistent999" }, mockContext),
+      ).rejects.toThrow(/not found|no cell|nonexistent999/i);
+    });
+
+    it("respects limit parameter", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      const result = await hive_cells.execute({ limit: 2 }, mockContext);
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(cells.length).toBeLessThanOrEqual(2);
+    });
+
+    it("combines filters (status + type + limit)", async () => {
+      const { hive_cells } = await import("./hive");
+      
+      // Create some task cells
+      for (let i = 0; i < 3; i++) {
+        const r = await hive_create.execute(
+          { title: `Task ${i}`, type: "task" },
+          mockContext,
+        );
+        const c = parseResponse<Cell>(r);
+        createdBeadIds.push(c.id);
+      }
+
+      const result = await hive_cells.execute(
+        { status: "open", type: "task", limit: 2 },
+        mockContext,
+      );
+      const cells = parseResponse<Cell[]>(result);
+
+      expect(cells.length).toBeLessThanOrEqual(2);
+      expect(cells.every((c) => c.status === "open" && c.issue_type === "task")).toBe(true);
+    });
+  });
+
   describe("bigint to Date conversion", () => {
     it("should handle PGLite bigint timestamps correctly in hive_query", async () => {
       const { mkdirSync, rmSync } = await import("node:fs");
