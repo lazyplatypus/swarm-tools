@@ -179,7 +179,14 @@ Auto-saves progress at milestones. Survives context death or crashes. Data store
 
 ---
 
-## What's New in v0.32
+## What's New in v0.33
+
+- **Pino logging infrastructure** - Structured JSON logs with daily rotation to `~/.config/swarm-tools/logs/`
+- **Compaction hook instrumented** - 14 log points across all phases (START, GATHER, RENDER, DECIDE, COMPLETE)
+- **`swarm log` CLI** - Query/tail logs with module, level, and time filters
+- **Analytics queries** - 5 pre-built queries based on Four Golden Signals (latency, traffic, errors, saturation, conflicts)
+
+### v0.32
 
 - **libSQL storage** (embedded SQLite) replaced PGLite - no external DB needed
 - **95% integration test coverage** - checkpoint/recovery proven with 9 tests
@@ -234,6 +241,27 @@ swarm doctor    # Check dependencies (CASS, UBS, Ollama)
 swarm init      # Initialize hive in project
 swarm config    # Show config file paths
 ```
+
+### Logging & Observability
+
+Structured Pino logging with daily rotation:
+
+```bash
+# Enable pretty logging during development
+SWARM_LOG_PRETTY=1 opencode
+
+# Query logs
+swarm log                      # Tail recent logs
+swarm log compaction           # Filter by module
+swarm log --level warn         # Filter by level (warn+)
+swarm log --since 1h           # Last hour
+swarm log --json | jq          # Pipe to jq for analysis
+```
+
+**Log files:** `~/.config/swarm-tools/logs/`
+- `swarm.1log`, `swarm.2log`, ... (main logs)
+- `compaction.1log`, ... (module-specific)
+- Daily rotation, 14-day retention
 
 ---
 

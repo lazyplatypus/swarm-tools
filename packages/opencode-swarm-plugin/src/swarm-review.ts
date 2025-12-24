@@ -551,23 +551,8 @@ You may now complete the task with \`swarm_complete\`.`,
         }
       }
 
-      // Send failure message
-      await sendSwarmMessage({
-        projectPath: args.project_key,
-        fromAgent: "coordinator",
-        toAgents: [args.worker_id],
-        subject: `FAILED: ${args.task_id} - max review attempts reached`,
-        body: `## Task Failed ✗
-
-Maximum review attempts (${MAX_REVIEW_ATTEMPTS}) reached.
-
-**Last Issues:**
-${parsedIssues.map((i: ReviewIssue) => `- ${i.file}${i.line ? `:${i.line}` : ""}: ${i.issue}`).join("\n")}
-
-The task has been marked as blocked. A human or different approach is needed.`,
-        threadId: epicId,
-        importance: "urgent",
-      });
+      // NO sendSwarmMessage - worker is dead, can't read it
+      // Coordinator handles retry or escalation
 
       return JSON.stringify(
         {
@@ -584,35 +569,8 @@ The task has been marked as blocked. A human or different approach is needed.`,
       );
     }
 
-    // Send feedback message
-    const issuesList = parsedIssues
-      .map((i: ReviewIssue) => {
-        let line = `- **${i.file}**`;
-        if (i.line) line += `:${i.line}`;
-        line += `: ${i.issue}`;
-        if (i.suggestion) line += `\n  → ${i.suggestion}`;
-        return line;
-      })
-      .join("\n");
-
-    await sendSwarmMessage({
-      projectPath: args.project_key,
-      fromAgent: "coordinator",
-      toAgents: [args.worker_id],
-      subject: `NEEDS CHANGES: ${args.task_id} (attempt ${attemptNumber}/${MAX_REVIEW_ATTEMPTS})`,
-      body: `## Review: Changes Needed
-
-${args.summary || "Please address the following issues:"}
-
-**Issues:**
-${issuesList}
-
-**Remaining attempts:** ${remaining}
-
-Please fix these issues and request another review.`,
-      threadId: epicId,
-      importance: "high",
-    });
+    // NO sendSwarmMessage for needs_changes - worker is dead
+    // Instead, return retry_context for coordinator to use with swarm_spawn_retry
 
     return JSON.stringify(
       {
@@ -622,7 +580,14 @@ Please fix these issues and request another review.`,
         attempt: attemptNumber,
         remaining_attempts: remaining,
         issues: parsedIssues,
-        message: `Feedback sent. ${remaining} attempt(s) remaining.`,
+        message: `Review feedback ready. ${remaining} attempt(s) remaining.`,
+        retry_context: {
+          task_id: args.task_id,
+          attempt: attemptNumber,
+          max_attempts: MAX_REVIEW_ATTEMPTS,
+          issues: parsedIssues,
+          next_action: "Use swarm_spawn_retry to spawn new worker with these issues",
+        },
       },
       null,
       2

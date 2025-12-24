@@ -130,9 +130,10 @@ export {
 } from "./streams/swarm-mail";
 
 // ============================================================================
-// Analytics Module Exports (query builder and formatters)
+// Analytics Module Exports
 // ============================================================================
 
+// Event-sourcing analytics (queries 1-10 from analytics/)
 export {
 	agentActivity,
 	checkpointFrequency,
@@ -149,17 +150,23 @@ export {
 	scopeViolations,
 	strategySuccessRates,
 	taskDuration,
-} from "./analytics";
+} from "./analytics/index.js";
 export type {
 	AgentActivityFilters,
-	AnalyticsQuery,
 	FailedDecompositionsFilters,
 	LockContentionFilters,
 	MessageLatencyFilters,
 	OutputFormat,
 	QueryResult,
 	StrategySuccessRatesFilters,
-} from "./analytics";
+} from "./analytics/index.js";
+
+// Four Golden Signals analytics (new root-level module)
+export {
+	ANALYTICS_QUERIES,
+	runAnalyticsQuery,
+	type AnalyticsQuery,
+} from "./analytics.js";
 
 // ============================================================================
 // Hive Module Exports (work item tracking)

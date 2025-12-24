@@ -700,3 +700,180 @@ describe("edge cases", () => {
     expect(prompt).toContain(longDiff);
   });
 });
+
+// ============================================================================
+// Coordinator-Driven Retry: swarm_review_feedback returns retry_context
+// ============================================================================
+
+describe("swarm_review_feedback retry_context", () => {
+  beforeEach(() => {
+    clearReviewStatus("bd-retry-test");
+    vi.clearAllMocks();
+  });
+
+  it("returns retry_context when status is needs_changes", async () => {
+    const issues = JSON.stringify([
+      { file: "src/auth.ts", line: 42, issue: "Missing null check", suggestion: "Add null check" }
+    ]);
+
+    const result = await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "needs_changes",
+        issues,
+      },
+      mockContext
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.status).toBe("needs_changes");
+    // NEW: Should include retry_context for coordinator
+    expect(parsed).toHaveProperty("retry_context");
+    expect(parsed.retry_context).toHaveProperty("task_id", "bd-retry-test");
+    expect(parsed.retry_context).toHaveProperty("attempt", 1);
+    expect(parsed.retry_context).toHaveProperty("issues");
+    expect(parsed.retry_context.issues).toHaveLength(1);
+  });
+
+  it("retry_context includes issues in structured format", async () => {
+    const issues = [
+      { file: "src/a.ts", line: 10, issue: "Bug A", suggestion: "Fix A" },
+      { file: "src/b.ts", line: 20, issue: "Bug B", suggestion: "Fix B" },
+    ];
+
+    const result = await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "needs_changes",
+        issues: JSON.stringify(issues),
+      },
+      mockContext
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.retry_context.issues).toEqual(issues);
+  });
+
+  it("retry_context includes next_action hint for coordinator", async () => {
+    const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
+
+    const result = await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "needs_changes",
+        issues,
+      },
+      mockContext
+    );
+
+    const parsed = JSON.parse(result);
+    // Should tell coordinator what to do next
+    expect(parsed.retry_context).toHaveProperty("next_action");
+    expect(parsed.retry_context.next_action).toContain("swarm_spawn_retry");
+  });
+
+  it("does NOT include retry_context when approved", async () => {
+    const result = await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "approved",
+        summary: "Looks good!",
+      },
+      mockContext
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.status).toBe("approved");
+    expect(parsed).not.toHaveProperty("retry_context");
+  });
+
+  it("does NOT include retry_context when task fails (3 attempts)", async () => {
+    const issues = JSON.stringify([{ file: "x.ts", issue: "still broken" }]);
+
+    // Exhaust all attempts
+    let result: string = "";
+    for (let i = 0; i < 3; i++) {
+      result = await swarm_review_feedback.execute(
+        {
+          project_key: "/tmp/test-project",
+          task_id: "bd-retry-test",
+          worker_id: "worker-test",
+          status: "needs_changes",
+          issues,
+        },
+        mockContext
+      );
+    }
+
+    const parsed = JSON.parse(result);
+    expect(parsed.task_failed).toBe(true);
+    // No retry_context when task is failed - nothing more to retry
+    expect(parsed).not.toHaveProperty("retry_context");
+  });
+
+  it("retry_context includes max_attempts for coordinator awareness", async () => {
+    const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
+
+    const result = await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "needs_changes",
+        issues,
+      },
+      mockContext
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.retry_context).toHaveProperty("max_attempts", 3);
+  });
+
+  it("does NOT send message to dead worker for needs_changes", async () => {
+    const { sendSwarmMessage } = await import("swarm-mail");
+    const issues = JSON.stringify([{ file: "x.ts", issue: "bug" }]);
+
+    await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "needs_changes",
+        issues,
+      },
+      mockContext
+    );
+
+    // Should NOT call sendSwarmMessage for needs_changes
+    // Workers are dead - they can't read messages
+    expect(sendSwarmMessage).not.toHaveBeenCalled();
+  });
+
+  it("DOES send message for approved status (audit trail)", async () => {
+    const { sendSwarmMessage } = await import("swarm-mail");
+
+    await swarm_review_feedback.execute(
+      {
+        project_key: "/tmp/test-project",
+        task_id: "bd-retry-test",
+        worker_id: "worker-test",
+        status: "approved",
+        summary: "Good work!",
+      },
+      mockContext
+    );
+
+    // Approved messages are still sent for audit trail
+    expect(sendSwarmMessage).toHaveBeenCalled();
+  });
+});
