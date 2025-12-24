@@ -1393,12 +1393,6 @@ export const swarm_plan_prompt = tool({
       .enum(["file-based", "feature-based", "risk-based", "auto"])
       .optional()
       .describe("Decomposition strategy (default: auto-detect)"),
-    max_subtasks: tool.schema
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe("Suggested max subtasks (optional - LLM decides if not specified)"),
     context: tool.schema
       .string()
       .optional()
@@ -1482,8 +1476,7 @@ export const swarm_plan_prompt = tool({
       .replace("{strategy_guidelines}", strategyGuidelines)
       .replace("{context_section}", contextSection)
       .replace("{cass_history}", "") // Empty for now
-      .replace("{skills_context}", skillsContext || "")
-      .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString());
+      .replace("{skills_context}", skillsContext || "");
 
     return JSON.stringify(
       {

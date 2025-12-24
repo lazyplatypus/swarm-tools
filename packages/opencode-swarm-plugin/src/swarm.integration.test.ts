@@ -79,7 +79,6 @@ describe("swarm_decompose", () => {
     const result = await swarm_decompose.execute(
       {
         task: "Add user authentication with OAuth",
-        max_subtasks: 3,
       },
       mockContext,
     );
@@ -97,7 +96,6 @@ describe("swarm_decompose", () => {
     const result = await swarm_decompose.execute(
       {
         task: "Refactor the API routes",
-        max_subtasks: 5,
         context: "Using Next.js App Router with RSC",
       },
       mockContext,
@@ -109,20 +107,6 @@ describe("swarm_decompose", () => {
     expect(parsed.prompt).toContain("Additional Context");
   });
 
-  it("uses default max_subtasks when not provided", async () => {
-    const result = await swarm_decompose.execute(
-      {
-        task: "Simple task",
-        max_subtasks: 5, // Explicit default since schema requires it
-      },
-      mockContext,
-    );
-
-    const parsed = JSON.parse(result);
-
-    // Prompt should say "as many as needed" (max_subtasks no longer in template)
-    expect(parsed.prompt).toContain("as many as needed");
-  });
 });
 
 // ============================================================================
@@ -262,7 +246,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Add user settings page",
-        max_subtasks: 3,
         query_cass: false, // Disable CASS to isolate test
       },
       mockContext,
@@ -281,7 +264,6 @@ describe("swarm_plan_prompt", () => {
       {
         task: "Do something",
         strategy: "risk-based",
-        max_subtasks: 3,
         query_cass: false,
       },
       mockContext,
@@ -296,7 +278,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Refactor the codebase",
-        max_subtasks: 4,
         query_cass: false,
       },
       mockContext,
@@ -314,7 +295,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Build new feature",
-        max_subtasks: 3,
         query_cass: false,
       },
       mockContext,
@@ -330,7 +310,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Some task",
-        max_subtasks: 5,
         query_cass: false,
       },
       mockContext,
@@ -350,7 +329,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Add feature",
-        max_subtasks: 3,
       },
       mockContext,
     );
@@ -375,7 +353,6 @@ describe("swarm_plan_prompt", () => {
     const result = await swarm_plan_prompt.execute(
       {
         task: "Add user profile",
-        max_subtasks: 3,
         context: "We use Next.js App Router with server components",
         query_cass: false,
       },
@@ -387,19 +364,6 @@ describe("swarm_plan_prompt", () => {
     expect(parsed.prompt).toContain("server components");
   });
 
-  it("includes max_subtasks in prompt", async () => {
-    const result = await swarm_plan_prompt.execute(
-      {
-        task: "Build something",
-        max_subtasks: 7,
-        query_cass: false,
-      },
-      mockContext,
-    );
-    const parsed = JSON.parse(result);
-
-    expect(parsed.prompt).toContain("as many as needed");
-  });
 });
 
 describe("swarm_validate_decomposition", () => {
@@ -920,7 +884,6 @@ describe("full swarm flow (integration)", () => {
         const decomposeResult = await swarm_decompose.execute(
           {
             task: "Add unit tests for auth module",
-            max_subtasks: 2,
           },
           ctx,
         );
@@ -1228,7 +1191,6 @@ describe("swarm_init", () => {
     const result = await swarm_decompose.execute(
       {
         task: "Add user authentication",
-        max_subtasks: 3,
         query_cass: true, // Request CASS but it may not be available
       },
       mockContext,
@@ -1249,7 +1211,6 @@ describe("swarm_init", () => {
     const result = await swarm_decompose.execute(
       {
         task: "Add user authentication",
-        max_subtasks: 3,
         query_cass: false, // Explicitly skip CASS
       },
       mockContext,
@@ -1264,7 +1225,6 @@ describe("swarm_init", () => {
     const result = await swarm_decompose.execute(
       {
         task: "Build feature X",
-        max_subtasks: 3,
       },
       mockContext,
     );

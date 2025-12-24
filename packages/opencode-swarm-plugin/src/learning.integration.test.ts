@@ -976,7 +976,6 @@ describe("Swarm Tool Integrations", () => {
       const result = await swarm_decompose.execute(
         {
           task: "Add user authentication",
-          max_subtasks: 3,
           query_cass: true,
         },
         mockContext,
@@ -992,7 +991,6 @@ describe("Swarm Tool Integrations", () => {
       const result = await swarm_decompose.execute(
         {
           task: "Add user authentication",
-          max_subtasks: 3,
           query_cass: false,
         },
         mockContext,

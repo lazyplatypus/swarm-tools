@@ -63,8 +63,8 @@ export const EvalRecordSchema = z.object({
   context: z.string().optional(),
   /** Strategy used for decomposition */
   strategy: z.enum(["file-based", "feature-based", "risk-based", "auto"]),
-  /** Max subtasks requested */
-  max_subtasks: z.number().int().min(1).max(10),
+  /** Number of subtasks generated */
+  subtask_count: z.number().int().min(1),
 
   // OUTPUT (the decomposition)
   /** Epic title */
@@ -238,7 +238,6 @@ export function captureDecomposition(params: {
   task: string;
   context?: string;
   strategy: "file-based" | "feature-based" | "risk-based" | "auto";
-  maxSubtasks: number;
   epicTitle: string;
   epicDescription?: string;
   subtasks: Array<{
@@ -256,7 +255,7 @@ export function captureDecomposition(params: {
     task: params.task,
     context: params.context,
     strategy: params.strategy,
-    max_subtasks: params.maxSubtasks,
+    subtask_count: params.subtasks.length,
     epic_title: params.epicTitle,
     epic_description: params.epicDescription,
     subtasks: params.subtasks,
@@ -409,7 +408,7 @@ export function exportForEvalite(projectPath: string): Array<{
   input: { task: string; context?: string };
   expected: {
     minSubtasks: number;
-    maxSubtasks: number;
+    subtaskCount: number;
     requiredFiles?: string[];
     overallSuccess?: boolean;
   };
@@ -426,7 +425,7 @@ export function exportForEvalite(projectPath: string): Array<{
       },
       expected: {
         minSubtasks: 2,
-        maxSubtasks: record.max_subtasks,
+        subtaskCount: record.subtask_count,
         requiredFiles: record.subtasks.flatMap((s) => s.files),
         overallSuccess: record.overall_success,
       },

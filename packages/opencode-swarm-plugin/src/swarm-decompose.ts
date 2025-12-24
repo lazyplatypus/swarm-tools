@@ -434,12 +434,6 @@ export const swarm_decompose = tool({
     "Generate decomposition prompt for breaking task into parallelizable subtasks. Optionally queries CASS for similar past tasks.",
   args: {
     task: tool.schema.string().min(1).describe("Task description to decompose"),
-    max_subtasks: tool.schema
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe("Suggested max subtasks (optional - LLM decides if not specified)"),
     context: tool.schema
       .string()
       .optional()
@@ -503,7 +497,6 @@ export const swarm_decompose = tool({
       : "## Additional Context\n(none provided)";
 
     const prompt = DECOMPOSITION_PROMPT.replace("{task}", args.task)
-      .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString())
       .replace("{context_section}", contextSection);
 
     // Return the prompt and schema info for the caller
@@ -697,12 +690,6 @@ export const swarm_delegate_planning = tool({
       .string()
       .optional()
       .describe("Additional context to include"),
-    max_subtasks: tool.schema
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe("Suggested max subtasks (optional - LLM decides if not specified)"),
     strategy: tool.schema
       .enum(["auto", "file-based", "feature-based", "risk-based"])
       .optional()
@@ -804,8 +791,7 @@ export const swarm_delegate_planning = tool({
       .replace("{strategy_guidelines}", strategyGuidelines)
       .replace("{context_section}", contextSection)
       .replace("{cass_history}", cassContext || "")
-      .replace("{skills_context}", skillsContext || "")
-      .replace("{max_subtasks}", (args.max_subtasks ?? 5).toString());
+      .replace("{skills_context}", skillsContext || "");
 
     // Add strict JSON-only instructions for the subagent
     const subagentInstructions = `

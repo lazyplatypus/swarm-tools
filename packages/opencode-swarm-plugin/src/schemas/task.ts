@@ -87,7 +87,6 @@ export type TaskDecomposition = z.infer<typeof TaskDecompositionSchema>;
  */
 export const DecomposeArgsSchema = z.object({
   task: z.string().min(1),
-  max_subtasks: z.number().int().min(1).default(5),
   context: z.string().optional(),
 });
 export type DecomposeArgs = z.infer<typeof DecomposeArgsSchema>;
