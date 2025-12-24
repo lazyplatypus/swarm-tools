@@ -7,6 +7,8 @@ import {
   SWARM_COMPACTION_CONTEXT,
   SWARM_DETECTION_FALLBACK,
   createCompactionHook,
+  scanSessionMessages,
+  type ScannedSwarmState,
 } from "./compaction-hook";
 
 // Track log calls for verification
@@ -463,13 +465,230 @@ describe("Compaction Hook", () => {
       await hook(input, output);
 
       // If context was injected, should log the size
-      if (output.context.length > 0) {
-        const injectionLog = logCalls.find(
-          (log) =>
-            log.level === "info" && log.message === "injected swarm context",
-        );
-        expect(injectionLog?.data.context_length).toBeGreaterThan(0);
-      }
+        if (output.context.length > 0) {
+          const injectionLog = logCalls.find(
+            (log) =>
+              log.level === "info" && log.message === "injected swarm context",
+          );
+          expect(injectionLog?.data.context_length).toBeGreaterThan(0);
+        }
+    });
+  });
+
+  describe("scanSessionMessages", () => {
+    it("returns empty state when client is undefined", async () => {
+      const state = await scanSessionMessages(undefined, "test-session");
+      expect(state.epicId).toBeUndefined();
+      expect(state.agentName).toBeUndefined();
+      expect(state.subtasks.size).toBe(0);
+    });
+
+    it("returns empty state when client is null", async () => {
+      const state = await scanSessionMessages(null, "test-session");
+      expect(state.epicId).toBeUndefined();
+      expect(state.subtasks.size).toBe(0);
+    });
+
+    it("extracts epic data from hive_create_epic tool call", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "msg-1", sessionID: "test-session" },
+                parts: [
+                  {
+                    type: "tool",
+                    tool: "hive_create_epic",
+                    state: {
+                      status: "completed",
+                      input: { epic_title: "Test Epic" },
+                      output: JSON.stringify({ epic: { id: "epic-123" } }),
+                      time: { start: 1000, end: 2000 },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      };
+
+      const state = await scanSessionMessages(mockClient, "test-session");
+      expect(state.epicId).toBe("epic-123");
+      expect(state.epicTitle).toBe("Test Epic");
+    });
+
+    it("extracts agent name from swarmmail_init tool call", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "msg-1", sessionID: "test-session" },
+                parts: [
+                  {
+                    type: "tool",
+                    tool: "swarmmail_init",
+                    state: {
+                      status: "completed",
+                      input: {},
+                      output: JSON.stringify({
+                        agent_name: "BlueLake",
+                        project_key: "/test/project",
+                      }),
+                      time: { start: 1000, end: 2000 },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      };
+
+      const state = await scanSessionMessages(mockClient, "test-session");
+      expect(state.agentName).toBe("BlueLake");
+      expect(state.projectPath).toBe("/test/project");
+    });
+
+    it("tracks subtasks from swarm_spawn_subtask tool calls", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "msg-1", sessionID: "test-session" },
+                parts: [
+                  {
+                    type: "tool",
+                    tool: "swarm_spawn_subtask",
+                    state: {
+                      status: "completed",
+                      input: {
+                        bead_id: "bd-123.1",
+                        epic_id: "epic-123",
+                        subtask_title: "Add auth",
+                        files: ["src/auth.ts"],
+                      },
+                      output: JSON.stringify({ worker: "RedMountain" }),
+                      time: { start: 1000, end: 2000 },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      };
+
+      const state = await scanSessionMessages(mockClient, "test-session");
+      expect(state.subtasks.size).toBe(1);
+      const subtask = state.subtasks.get("bd-123.1");
+      expect(subtask?.title).toBe("Add auth");
+      expect(subtask?.status).toBe("spawned");
+      expect(subtask?.worker).toBe("RedMountain");
+      expect(subtask?.files).toEqual(["src/auth.ts"]);
+    });
+
+    it("marks subtasks as completed from swarm_complete tool calls", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "msg-1", sessionID: "test-session" },
+                parts: [
+                  {
+                    type: "tool",
+                    tool: "swarm_spawn_subtask",
+                    state: {
+                      status: "completed",
+                      input: {
+                        bead_id: "bd-123.1",
+                        subtask_title: "Add auth",
+                      },
+                      output: "{}",
+                      time: { start: 1000, end: 2000 },
+                    },
+                  },
+                  {
+                    type: "tool",
+                    tool: "swarm_complete",
+                    state: {
+                      status: "completed",
+                      input: { bead_id: "bd-123.1" },
+                      output: "{}",
+                      time: { start: 3000, end: 4000 },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      };
+
+      const state = await scanSessionMessages(mockClient, "test-session");
+      const subtask = state.subtasks.get("bd-123.1");
+      expect(subtask?.status).toBe("completed");
+    });
+
+    it("tracks last action", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => ({
+            data: [
+              {
+                info: { id: "msg-1", sessionID: "test-session" },
+                parts: [
+                  {
+                    type: "tool",
+                    tool: "swarm_status",
+                    state: {
+                      status: "completed",
+                      input: { epic_id: "epic-123", project_key: "/test" },
+                      output: "{}",
+                      time: { start: 5000, end: 6000 },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      };
+
+      const state = await scanSessionMessages(mockClient, "test-session");
+      expect(state.lastAction?.tool).toBe("swarm_status");
+      expect(state.lastAction?.timestamp).toBe(6000);
+    });
+
+    it("handles SDK errors gracefully", async () => {
+      const mockClient = {
+        session: {
+          messages: async () => {
+            throw new Error("SDK error");
+          },
+        },
+      };
+
+      // Should not throw, just return empty state
+      const state = await scanSessionMessages(mockClient, "test-session");
+      expect(state.subtasks.size).toBe(0);
+    });
+
+    it("respects limit parameter", async () => {
+      const mockClient = {
+        session: {
+          messages: async (opts: { query?: { limit?: number } }) => {
+            expect(opts.query?.limit).toBe(50);
+            return { data: [] };
+          },
+        },
+      };
+
+      await scanSessionMessages(mockClient, "test-session", 50);
     });
   });
 });

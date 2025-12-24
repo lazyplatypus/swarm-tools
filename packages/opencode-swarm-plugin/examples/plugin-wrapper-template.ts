@@ -16,8 +16,53 @@
 import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import { spawn } from "child_process";
+import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const SWARM_CLI = "swarm";
+
+// =============================================================================
+// File-based Logging (writes to ~/.config/swarm-tools/logs/)
+// =============================================================================
+
+const LOG_DIR = join(homedir(), ".config", "swarm-tools", "logs");
+const COMPACTION_LOG = join(LOG_DIR, "compaction.log");
+
+/**
+ * Ensure log directory exists
+ */
+function ensureLogDir(): void {
+  if (!existsSync(LOG_DIR)) {
+    mkdirSync(LOG_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Log a compaction event to file (JSON lines format, compatible with `swarm log`)
+ * 
+ * @param level - Log level (info, debug, warn, error)
+ * @param msg - Log message
+ * @param data - Additional structured data
+ */
+function logCompaction(
+  level: "info" | "debug" | "warn" | "error",
+  msg: string,
+  data?: Record<string, unknown>,
+): void {
+  try {
+    ensureLogDir();
+    const entry = JSON.stringify({
+      time: new Date().toISOString(),
+      level,
+      msg,
+      ...data,
+    });
+    appendFileSync(COMPACTION_LOG, entry + "\n");
+  } catch {
+    // Silently fail - logging should never break the plugin
+  }
+}
 
 // Module-level project directory - set during plugin initialization
 // This is CRITICAL: without it, the CLI uses process.cwd() which may be wrong
@@ -952,26 +997,69 @@ interface SwarmStateSnapshot {
  * Shells out to swarm CLI to get real data.
  */
 async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
+  const startTime = Date.now();
+  
+  logCompaction("debug", "query_swarm_state_start", {
+    session_id: sessionID,
+    project_directory: projectDirectory,
+  });
+
   try {
     // Query cells via swarm CLI
-    const cellsResult = await new Promise<{ exitCode: number; stdout: string }>(
+    const cliStart = Date.now();
+    const cellsResult = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
       (resolve) => {
         const proc = spawn(SWARM_CLI, ["tool", "hive_query"], {
           cwd: projectDirectory,
           stdio: ["ignore", "pipe", "pipe"],
         });
         let stdout = "";
+        let stderr = "";
         proc.stdout.on("data", (d) => {
           stdout += d;
         });
+        proc.stderr.on("data", (d) => {
+          stderr += d;
+        });
         proc.on("close", (exitCode) =>
-          resolve({ exitCode: exitCode ?? 1, stdout }),
+          resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
         );
       },
     );
+    const cliDuration = Date.now() - cliStart;
 
-    const cells =
-      cellsResult.exitCode === 0 ? JSON.parse(cellsResult.stdout) : [];
+    logCompaction("debug", "query_swarm_state_cli_complete", {
+      session_id: sessionID,
+      duration_ms: cliDuration,
+      exit_code: cellsResult.exitCode,
+      stdout_length: cellsResult.stdout.length,
+      stderr_length: cellsResult.stderr.length,
+    });
+
+    let cells: any[] = [];
+    if (cellsResult.exitCode === 0) {
+      try {
+        cells = JSON.parse(cellsResult.stdout);
+      } catch (parseErr) {
+        logCompaction("error", "query_swarm_state_parse_failed", {
+          session_id: sessionID,
+          error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+          stdout_preview: cellsResult.stdout.substring(0, 500),
+        });
+      }
+    }
+
+    logCompaction("debug", "query_swarm_state_cells_parsed", {
+      session_id: sessionID,
+      cell_count: cells.length,
+      cells: cells.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        type: c.type,
+        status: c.status,
+        parent_id: c.parent_id,
+      })),
+    });
 
     // Find active epic (first unclosed epic with subtasks)
     const openEpics = cells.filter(
@@ -979,6 +1067,12 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
         c.type === "epic" && c.status !== "closed",
     );
     const epic = openEpics[0];
+
+    logCompaction("debug", "query_swarm_state_epics", {
+      session_id: sessionID,
+      open_epic_count: openEpics.length,
+      selected_epic: epic ? { id: epic.id, title: epic.title, status: epic.status } : null,
+    });
 
     // Get subtasks if we have an epic
     const subtasks =
@@ -988,15 +1082,26 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
           )
         : [];
 
+    logCompaction("debug", "query_swarm_state_subtasks", {
+      session_id: sessionID,
+      subtask_count: subtasks.length,
+      subtasks: subtasks.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        files: s.files,
+      })),
+    });
+
     // TODO: Query swarm mail for messages and reservations
     // For MVP, use empty arrays - the fallback chain handles this
     const messages: SwarmStateSnapshot["messages"] = [];
     const reservations: SwarmStateSnapshot["reservations"] = [];
 
-    // Run detection for confidence
+    // Run detection for confidence (already logged internally)
     const detection = await detectSwarm();
 
-    return {
+    const snapshot: SwarmStateSnapshot = {
       sessionID,
       detection: {
         confidence: detection.confidence,
@@ -1023,7 +1128,27 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
       messages,
       reservations,
     };
+
+    const totalDuration = Date.now() - startTime;
+    logCompaction("debug", "query_swarm_state_complete", {
+      session_id: sessionID,
+      duration_ms: totalDuration,
+      has_epic: !!snapshot.epic,
+      epic_id: snapshot.epic?.id,
+      subtask_count: snapshot.epic?.subtasks?.length ?? 0,
+      message_count: snapshot.messages.length,
+      reservation_count: snapshot.reservations.length,
+    });
+
+    return snapshot;
   } catch (err) {
+    logCompaction("error", "query_swarm_state_exception", {
+      session_id: sessionID,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      duration_ms: Date.now() - startTime,
+    });
+
     // If query fails, return minimal snapshot
     const detection = await detectSwarm();
     return {
@@ -1049,10 +1174,19 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
 async function generateCompactionPrompt(
   snapshot: SwarmStateSnapshot,
 ): Promise<string | null> {
-  try {
-    const liteModel =
-      process.env.OPENCODE_LITE_MODEL || "claude-3-5-haiku-20241022";
+  const startTime = Date.now();
+  const liteModel = process.env.OPENCODE_LITE_MODEL || "claude-3-5-haiku-20241022";
 
+  logCompaction("debug", "generate_compaction_prompt_start", {
+    session_id: snapshot.sessionID,
+    lite_model: liteModel,
+    has_epic: !!snapshot.epic,
+    epic_id: snapshot.epic?.id,
+    subtask_count: snapshot.epic?.subtasks?.length ?? 0,
+    snapshot_size: JSON.stringify(snapshot).length,
+  });
+
+  try {
     const promptText = `You are generating a continuation prompt for a compacted swarm coordination session.
 
 Analyze this swarm state and generate a structured markdown prompt that will be given to the resumed session:
@@ -1100,6 +1234,14 @@ You are resuming coordination of an active swarm that was interrupted by context
 
 Keep the prompt concise but actionable. Use actual data from the snapshot, not placeholders.`;
 
+    logCompaction("debug", "generate_compaction_prompt_calling_llm", {
+      session_id: snapshot.sessionID,
+      prompt_length: promptText.length,
+      model: liteModel,
+      command: `opencode run -m ${liteModel} -- <prompt>`,
+    });
+
+    const llmStart = Date.now();
     const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
       (resolve, reject) => {
         const proc = spawn("opencode", ["run", "-m", liteModel, "--", promptText], {
@@ -1133,20 +1275,51 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
         }, 30000);
       },
     );
+    const llmDuration = Date.now() - llmStart;
+
+    logCompaction("debug", "generate_compaction_prompt_llm_complete", {
+      session_id: snapshot.sessionID,
+      duration_ms: llmDuration,
+      exit_code: result.exitCode,
+      stdout_length: result.stdout.length,
+      stderr_length: result.stderr.length,
+      stderr_preview: result.stderr.substring(0, 500),
+      stdout_preview: result.stdout.substring(0, 500),
+    });
 
     if (result.exitCode !== 0) {
-      console.error(
-        "[Swarm Compaction] opencode run failed:",
-        result.stderr,
-      );
+      logCompaction("error", "generate_compaction_prompt_llm_failed", {
+        session_id: snapshot.sessionID,
+        exit_code: result.exitCode,
+        stderr: result.stderr,
+        stdout: result.stdout,
+        duration_ms: llmDuration,
+      });
       return null;
     }
 
     // Extract the prompt from stdout (LLM may wrap in markdown)
     const prompt = result.stdout.trim();
+    
+    const totalDuration = Date.now() - startTime;
+    logCompaction("debug", "generate_compaction_prompt_success", {
+      session_id: snapshot.sessionID,
+      total_duration_ms: totalDuration,
+      llm_duration_ms: llmDuration,
+      prompt_length: prompt.length,
+      prompt_preview: prompt.substring(0, 500),
+      prompt_has_content: prompt.length > 0,
+    });
+
     return prompt.length > 0 ? prompt : null;
   } catch (err) {
-    console.error("[Swarm Compaction] LLM generation failed:", err);
+    const totalDuration = Date.now() - startTime;
+    logCompaction("error", "generate_compaction_prompt_exception", {
+      session_id: snapshot.sessionID,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      duration_ms: totalDuration,
+    });
     return null;
   }
 }
@@ -1164,36 +1337,89 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
  * False negative = lost swarm (high cost)
  */
 async function detectSwarm(): Promise<SwarmDetection> {
+  const startTime = Date.now();
   const reasons: string[] = [];
   let highConfidence = false;
   let mediumConfidence = false;
   let lowConfidence = false;
 
+  logCompaction("debug", "detect_swarm_start", {
+    project_directory: projectDirectory,
+    cwd: process.cwd(),
+  });
+
   try {
-    const result = await new Promise<{ exitCode: number; stdout: string }>(
+    const cliStart = Date.now();
+    const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
       (resolve) => {
         // Use swarm tool to query beads
         const proc = spawn(SWARM_CLI, ["tool", "hive_query"], {
+          cwd: projectDirectory,
           stdio: ["ignore", "pipe", "pipe"],
         });
         let stdout = "";
+        let stderr = "";
         proc.stdout.on("data", (d) => {
           stdout += d;
         });
+        proc.stderr.on("data", (d) => {
+          stderr += d;
+        });
         proc.on("close", (exitCode) =>
-          resolve({ exitCode: exitCode ?? 1, stdout }),
+          resolve({ exitCode: exitCode ?? 1, stdout, stderr }),
         );
       },
     );
+    const cliDuration = Date.now() - cliStart;
+
+    logCompaction("debug", "detect_swarm_cli_complete", {
+      duration_ms: cliDuration,
+      exit_code: result.exitCode,
+      stdout_length: result.stdout.length,
+      stderr_length: result.stderr.length,
+      stderr_preview: result.stderr.substring(0, 200),
+    });
 
     if (result.exitCode !== 0) {
+      logCompaction("warn", "detect_swarm_cli_failed", {
+        exit_code: result.exitCode,
+        stderr: result.stderr,
+      });
       return { detected: false, confidence: "none", reasons: ["hive_query failed"] };
     }
 
-    const cells = JSON.parse(result.stdout);
+    let cells: any[];
+    try {
+      cells = JSON.parse(result.stdout);
+    } catch (parseErr) {
+      logCompaction("error", "detect_swarm_parse_failed", {
+        error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        stdout_preview: result.stdout.substring(0, 500),
+      });
+      return { detected: false, confidence: "none", reasons: ["hive_query parse failed"] };
+    }
+
     if (!Array.isArray(cells) || cells.length === 0) {
+      logCompaction("debug", "detect_swarm_no_cells", {
+        is_array: Array.isArray(cells),
+        length: cells?.length ?? 0,
+      });
       return { detected: false, confidence: "none", reasons: ["no cells found"] };
     }
+
+    // Log ALL cells for debugging
+    logCompaction("debug", "detect_swarm_cells_found", {
+      total_cells: cells.length,
+      cells: cells.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        type: c.type,
+        status: c.status,
+        parent_id: c.parent_id,
+        updated_at: c.updated_at,
+        created_at: c.created_at,
+      })),
+    });
 
     // HIGH: Any in_progress cells
     const inProgress = cells.filter(
@@ -1202,6 +1428,10 @@ async function detectSwarm(): Promise<SwarmDetection> {
     if (inProgress.length > 0) {
       highConfidence = true;
       reasons.push(`${inProgress.length} cells in_progress`);
+      logCompaction("debug", "detect_swarm_in_progress", {
+        count: inProgress.length,
+        cells: inProgress.map((c: any) => ({ id: c.id, title: c.title })),
+      });
     }
 
     // MEDIUM: Open subtasks (cells with parent_id)
@@ -1212,6 +1442,10 @@ async function detectSwarm(): Promise<SwarmDetection> {
     if (subtasks.length > 0) {
       mediumConfidence = true;
       reasons.push(`${subtasks.length} open subtasks`);
+      logCompaction("debug", "detect_swarm_open_subtasks", {
+        count: subtasks.length,
+        cells: subtasks.map((c: any) => ({ id: c.id, title: c.title, parent_id: c.parent_id })),
+      });
     }
 
     // MEDIUM: Unclosed epics
@@ -1222,6 +1456,10 @@ async function detectSwarm(): Promise<SwarmDetection> {
     if (openEpics.length > 0) {
       mediumConfidence = true;
       reasons.push(`${openEpics.length} unclosed epics`);
+      logCompaction("debug", "detect_swarm_open_epics", {
+        count: openEpics.length,
+        cells: openEpics.map((c: any) => ({ id: c.id, title: c.title, status: c.status })),
+      });
     }
 
     // MEDIUM: Recently updated cells (last hour)
@@ -1232,6 +1470,16 @@ async function detectSwarm(): Promise<SwarmDetection> {
     if (recentCells.length > 0) {
       mediumConfidence = true;
       reasons.push(`${recentCells.length} cells updated in last hour`);
+      logCompaction("debug", "detect_swarm_recent_cells", {
+        count: recentCells.length,
+        one_hour_ago: oneHourAgo,
+        cells: recentCells.map((c: any) => ({ 
+          id: c.id, 
+          title: c.title, 
+          updated_at: c.updated_at,
+          age_minutes: Math.round((Date.now() - c.updated_at) / 60000),
+        })),
+      });
     }
 
     // LOW: Any cells exist at all
@@ -1239,10 +1487,14 @@ async function detectSwarm(): Promise<SwarmDetection> {
       lowConfidence = true;
       reasons.push(`${cells.length} total cells in hive`);
     }
-  } catch {
+  } catch (err) {
     // Detection failed, use fallback
     lowConfidence = true;
     reasons.push("Detection error, using fallback");
+    logCompaction("error", "detect_swarm_exception", {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
   }
 
   // Determine overall confidence
@@ -1256,6 +1508,18 @@ async function detectSwarm(): Promise<SwarmDetection> {
   } else {
     confidence = "none";
   }
+
+  const totalDuration = Date.now() - startTime;
+  logCompaction("debug", "detect_swarm_complete", {
+    duration_ms: totalDuration,
+    confidence,
+    detected: confidence !== "none",
+    reason_count: reasons.length,
+    reasons,
+    high_confidence: highConfidence,
+    medium_confidence: mediumConfidence,
+    low_confidence: lowConfidence,
+  });
 
   return {
     detected: confidence !== "none",
@@ -1458,55 +1722,205 @@ export const SwarmPlugin: Plugin = async (
       input: { sessionID: string },
       output: CompactionOutput,
     ) => {
+      const startTime = Date.now();
+      
+      // =======================================================================
+      // LOG: Compaction hook invoked - capture EVERYTHING we receive
+      // =======================================================================
+      logCompaction("info", "compaction_hook_invoked", {
+        session_id: input.sessionID,
+        project_directory: projectDirectory,
+        input_keys: Object.keys(input),
+        input_full: JSON.parse(JSON.stringify(input)), // Deep clone for logging
+        output_keys: Object.keys(output),
+        output_context_count: output.context?.length ?? 0,
+        output_has_prompt_field: "prompt" in output,
+        output_initial_state: {
+          context: output.context,
+          prompt: (output as any).prompt,
+        },
+        env: {
+          OPENCODE_SESSION_ID: process.env.OPENCODE_SESSION_ID,
+          OPENCODE_MESSAGE_ID: process.env.OPENCODE_MESSAGE_ID,
+          OPENCODE_AGENT: process.env.OPENCODE_AGENT,
+          OPENCODE_LITE_MODEL: process.env.OPENCODE_LITE_MODEL,
+          SWARM_PROJECT_DIR: process.env.SWARM_PROJECT_DIR,
+        },
+        cwd: process.cwd(),
+        timestamp: new Date().toISOString(),
+      });
+
+      // =======================================================================
+      // STEP 1: Detect swarm state from hive
+      // =======================================================================
+      const detectionStart = Date.now();
       const detection = await detectSwarm();
+      const detectionDuration = Date.now() - detectionStart;
+
+      logCompaction("info", "swarm_detection_complete", {
+        session_id: input.sessionID,
+        duration_ms: detectionDuration,
+        detected: detection.detected,
+        confidence: detection.confidence,
+        reasons: detection.reasons,
+        reason_count: detection.reasons.length,
+      });
 
       if (detection.confidence === "high" || detection.confidence === "medium") {
         // Definite or probable swarm - try LLM-powered compaction
+        logCompaction("info", "swarm_detected_attempting_llm", {
+          session_id: input.sessionID,
+          confidence: detection.confidence,
+          reasons: detection.reasons,
+        });
+
         try {
           // Level 1: Query actual state
+          const queryStart = Date.now();
           const snapshot = await querySwarmState(input.sessionID);
+          const queryDuration = Date.now() - queryStart;
+
+          logCompaction("info", "swarm_state_queried", {
+            session_id: input.sessionID,
+            duration_ms: queryDuration,
+            has_epic: !!snapshot.epic,
+            epic_id: snapshot.epic?.id,
+            epic_title: snapshot.epic?.title,
+            epic_status: snapshot.epic?.status,
+            subtask_count: snapshot.epic?.subtasks?.length ?? 0,
+            subtasks: snapshot.epic?.subtasks?.map(s => ({
+              id: s.id,
+              title: s.title,
+              status: s.status,
+              file_count: s.files?.length ?? 0,
+            })),
+            message_count: snapshot.messages?.length ?? 0,
+            reservation_count: snapshot.reservations?.length ?? 0,
+            detection_confidence: snapshot.detection.confidence,
+            detection_reasons: snapshot.detection.reasons,
+            full_snapshot: snapshot, // Log the entire snapshot
+          });
 
           // Level 2: Generate prompt with LLM
+          const llmStart = Date.now();
           const llmPrompt = await generateCompactionPrompt(snapshot);
+          const llmDuration = Date.now() - llmStart;
+
+          logCompaction("info", "llm_generation_complete", {
+            session_id: input.sessionID,
+            duration_ms: llmDuration,
+            success: !!llmPrompt,
+            prompt_length: llmPrompt?.length ?? 0,
+            prompt_preview: llmPrompt?.substring(0, 500),
+          });
 
           if (llmPrompt) {
             // SUCCESS: Use LLM-generated prompt
             const header = `[Swarm compaction: LLM-generated, ${detection.reasons.join(", ")}]\n\n`;
+            const fullContent = header + llmPrompt;
 
             // Progressive enhancement: use new API if available
             if ("prompt" in output) {
-              output.prompt = header + llmPrompt;
+              output.prompt = fullContent;
+              logCompaction("info", "context_injected_via_prompt_api", {
+                session_id: input.sessionID,
+                content_length: fullContent.length,
+                method: "output.prompt",
+              });
             } else {
-              output.context.push(header + llmPrompt);
+              output.context.push(fullContent);
+              logCompaction("info", "context_injected_via_context_array", {
+                session_id: input.sessionID,
+                content_length: fullContent.length,
+                method: "output.context.push",
+                context_count_after: output.context.length,
+              });
             }
 
-            console.log(
-              "[Swarm Compaction] Using LLM-generated continuation prompt",
-            );
+            const totalDuration = Date.now() - startTime;
+            logCompaction("info", "compaction_complete_llm_success", {
+              session_id: input.sessionID,
+              total_duration_ms: totalDuration,
+              detection_duration_ms: detectionDuration,
+              query_duration_ms: queryDuration,
+              llm_duration_ms: llmDuration,
+              confidence: detection.confidence,
+              context_type: "llm_generated",
+              content_length: fullContent.length,
+            });
             return;
           }
 
           // LLM failed, fall through to static prompt
-          console.log(
-            "[Swarm Compaction] LLM generation returned null, using static prompt",
-          );
+          logCompaction("warn", "llm_generation_returned_null", {
+            session_id: input.sessionID,
+            llm_duration_ms: llmDuration,
+            falling_back_to: "static_prompt",
+          });
         } catch (err) {
           // LLM failed, fall through to static prompt
-          console.error(
-            "[Swarm Compaction] LLM generation failed, using static prompt:",
-            err,
-          );
+          logCompaction("error", "llm_generation_failed", {
+            session_id: input.sessionID,
+            error: err instanceof Error ? err.message : String(err),
+            error_stack: err instanceof Error ? err.stack : undefined,
+            falling_back_to: "static_prompt",
+          });
         }
 
         // Level 3: Fall back to static context
         const header = `[Swarm detected: ${detection.reasons.join(", ")}]\n\n`;
-        output.context.push(header + SWARM_COMPACTION_CONTEXT);
+        const staticContent = header + SWARM_COMPACTION_CONTEXT;
+        output.context.push(staticContent);
+
+        const totalDuration = Date.now() - startTime;
+        logCompaction("info", "compaction_complete_static_fallback", {
+          session_id: input.sessionID,
+          total_duration_ms: totalDuration,
+          confidence: detection.confidence,
+          context_type: "static_swarm_context",
+          content_length: staticContent.length,
+          context_count_after: output.context.length,
+        });
       } else if (detection.confidence === "low") {
         // Level 4: Possible swarm - inject fallback detection prompt
         const header = `[Possible swarm: ${detection.reasons.join(", ")}]\n\n`;
-        output.context.push(header + SWARM_DETECTION_FALLBACK);
+        const fallbackContent = header + SWARM_DETECTION_FALLBACK;
+        output.context.push(fallbackContent);
+
+        const totalDuration = Date.now() - startTime;
+        logCompaction("info", "compaction_complete_detection_fallback", {
+          session_id: input.sessionID,
+          total_duration_ms: totalDuration,
+          confidence: detection.confidence,
+          context_type: "detection_fallback",
+          content_length: fallbackContent.length,
+          context_count_after: output.context.length,
+          reasons: detection.reasons,
+        });
+      } else {
+        // Level 5: confidence === "none" - no injection, probably not a swarm
+        const totalDuration = Date.now() - startTime;
+        logCompaction("info", "compaction_complete_no_swarm", {
+          session_id: input.sessionID,
+          total_duration_ms: totalDuration,
+          confidence: detection.confidence,
+          context_type: "none",
+          reasons: detection.reasons,
+          context_count_unchanged: output.context.length,
+        });
       }
-      // Level 5: confidence === "none" - no injection, probably not a swarm
+
+      // =======================================================================
+      // LOG: Final output state
+      // =======================================================================
+      logCompaction("debug", "compaction_hook_complete_final_state", {
+        session_id: input.sessionID,
+        output_context_count: output.context?.length ?? 0,
+        output_context_lengths: output.context?.map(c => c.length) ?? [],
+        output_has_prompt: !!(output as any).prompt,
+        output_prompt_length: (output as any).prompt?.length ?? 0,
+        total_duration_ms: Date.now() - startTime,
+      });
     },
   };
 };

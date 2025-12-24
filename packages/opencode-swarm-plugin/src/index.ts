@@ -58,6 +58,7 @@ import {
   analyzeTodoWrite,
   shouldAnalyzeTool,
 } from "./planning-guardrails";
+import { createCompactionHook } from "./compaction-hook";
 
 /**
  * OpenCode Swarm Plugin
@@ -80,7 +81,7 @@ import {
 export const SwarmPlugin: Plugin = async (
   input: PluginInput,
 ): Promise<Hooks> => {
-  const { $, directory } = input;
+  const { $, directory, client } = input;
 
   // Set the working directory for hive commands
   // This ensures hive operations run in the project directory, not ~/.config/opencode
@@ -261,6 +262,25 @@ export const SwarmPlugin: Plugin = async (
       // Auto-sync was removed because bd CLI is deprecated
       // The hive_sync tool handles flushing to JSONL and git commit/push
     },
+
+    /**
+     * Compaction hook for swarm context preservation
+     *
+     * When OpenCode compacts session context, this hook injects swarm state
+     * to ensure coordinators can resume orchestration seamlessly.
+     *
+     * Uses SDK client to scan actual session messages for precise swarm state
+     * (epic IDs, subtask status, agent names) rather than relying solely on
+     * heuristic detection from hive/swarm-mail.
+     *
+     * Note: This hook is experimental and may not be in the published Hooks type yet.
+     */
+    "experimental.session.compacting": createCompactionHook(client),
+  } as Hooks & {
+    "experimental.session.compacting"?: (
+      input: { sessionID: string },
+      output: { context: string[] },
+    ) => Promise<void>;
   };
 };
 
