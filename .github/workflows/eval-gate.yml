@@ -1,13 +1,14 @@
 name: Eval Gate
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:  # Manual trigger for on-demand runs
 
 jobs:
   eval-gate:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     defaults:
       run:
