@@ -573,3 +573,21 @@
 {"id":"mem_mjl0xjsd_4x2gw3k","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-25T05:50:29.485Z"}
 {"id":"mem_mjl0xmby_jghp3tn","information":"Test memory for adapter wiring verification","created_at":"2025-12-25T05:50:32.782Z","tags":"test,memory"}
 {"id":"mem_mjl0xmfb_qfilp0o","information":"OAuth refresh tokens need 5min buffer before expiry","created_at":"2025-12-25T05:50:32.903Z","metadata":"{\"raw\":\"auth,tokens,oauth\"}","tags":"auth,integration-test"}
+{"id":"mem_mjljidpt_543g4ha","information":"Test memory for tools integration","created_at":"2025-12-25T14:30:34.481Z","tags":"test"}
+{"id":"mem_mjljidwu_7dyeb1j","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-25T14:30:34.734Z"}
+{"id":"mem_mjljie01_zhla7rt","information":"Test memory for plugin tool","created_at":"2025-12-25T14:30:34.849Z","tags":"test,plugin"}
+{"id":"mem_mjljie18_n7qrt6d","information":"TypeScript is a typed superset of JavaScript","created_at":"2025-12-25T14:30:34.892Z"}
+{"id":"mem_mjljie2y_1872ws5","information":"React hooks enable functional components to use state","created_at":"2025-12-25T14:30:34.954Z"}
+{"id":"mem_mjljie3q_ap819rs","information":"Next.js 15 was released by Vercel in October 2024","created_at":"2025-12-25T14:30:34.982Z"}
+{"id":"mem_mjljihi9_2qgv1li","information":"Test memory for tools integration","created_at":"2025-12-25T14:30:39.393Z","tags":"test"}
+{"id":"mem_mjljihkd_pp4uigi","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-25T14:30:39.469Z"}
+{"id":"mem_mjljihn4_r0s5949","information":"Test memory for plugin tool","created_at":"2025-12-25T14:30:39.568Z","tags":"test,plugin"}
+{"id":"mem_mjljiho2_fdyc36z","information":"TypeScript is a typed superset of JavaScript","created_at":"2025-12-25T14:30:39.602Z"}
+{"id":"mem_mjljihp9_8cp2u66","information":"React hooks enable functional components to use state","created_at":"2025-12-25T14:30:39.645Z"}
+{"id":"mem_mjljihq8_h9umc12","information":"Next.js 15 was released by Vercel in October 2024","created_at":"2025-12-25T14:30:39.680Z"}
+{"id":"mem_mjljq4i7_yj40zww","information":"Test memory for tools integration","created_at":"2025-12-25T14:36:35.791Z","tags":"test"}
+{"id":"mem_mjljq8cv_p3vprah","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-25T14:36:40.783Z"}
+{"id":"mem_mjljqalt_g58x3bi","information":"Test memory for plugin tool","created_at":"2025-12-25T14:36:43.697Z","tags":"test,plugin"}
+{"id":"mem_mjljqanu_2qvmq7o","information":"TypeScript is a typed superset of JavaScript","created_at":"2025-12-25T14:36:43.770Z"}
+{"id":"mem_mjljqape_ifvk8wt","information":"React hooks enable functional components to use state","created_at":"2025-12-25T14:36:43.826Z"}
+{"id":"mem_mjljqaqn_ej3t9iu","information":"Next.js 15 was released by Vercel in October 2024","created_at":"2025-12-25T14:36:43.871Z"}
