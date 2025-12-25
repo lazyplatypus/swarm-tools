@@ -39,3 +39,6 @@ npm-debug.log*
 .opencode/bun.lock
 .npmrc
 .opencode/eval-history.jsonl
+
+# Turborepo
+.turbo
