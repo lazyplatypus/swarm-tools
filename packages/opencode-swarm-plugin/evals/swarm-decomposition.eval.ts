@@ -34,7 +34,9 @@ import {
 } from "./lib/data-loader.js";
 
 // Determine project key from current directory
-const PROJECT_KEY = "opencode-swarm-plugin";
+// NOTE: project_key in eval_records is the full path (from getHiveWorkingDirectory),
+// not a short name. Use process.cwd() to match.
+const PROJECT_KEY = process.cwd();
 const PROJECT_PATH = process.cwd();
 
 // Check if we have enough real data to use instead of fixtures
@@ -42,7 +44,7 @@ const useRealData = await hasRealEvalData(PROJECT_KEY, 5, PROJECT_PATH);
 
 // Load data based on availability
 const evalCases = useRealData
-  ? await loadEvalCases(PROJECT_KEY, { limit: 20, projectPath: PROJECT_PATH })
+  ? await loadEvalCases(PROJECT_KEY, { limit: 20, projectPath: PROJECT_PATH })  // PROJECT_KEY is now process.cwd()
   : decompositionCases.map((testCase) => ({
       input: testCase.input,
       expected: testCase.expected,
