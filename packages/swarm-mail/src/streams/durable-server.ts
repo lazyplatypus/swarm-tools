@@ -8,6 +8,11 @@
  *
  * ## Endpoints
  *
+ * GET /cells
+ * - Returns all cells from the hive as JSON array
+ * - Requires hiveAdapter to be configured
+ * - Returns tree structure with parent-child relationships
+ *
  * GET /streams/:projectKey?offset=N&live=true
  * - offset: Start reading from this sequence (default 0)
  * - live: If true, keep connection open and stream new events via SSE
@@ -22,6 +27,7 @@
 
 import type { Server } from "bun";
 import type { DurableStreamAdapter, StreamEvent } from "./durable-adapter.js";
+import type { HiveAdapter } from "../types/hive-adapter.js";
 
 // Bun Server type without WebSocket data
 type BunServer = Server<undefined>;
@@ -32,6 +38,8 @@ type BunServer = Server<undefined>;
 export interface DurableStreamServerConfig {
   /** Adapter for reading events (single project) */
   adapter: DurableStreamAdapter;
+  /** Hive adapter for querying cells */
+  hiveAdapter?: HiveAdapter;
   /** Port to listen on (default 4483 - HIVE on phone keypad) */
   port?: number;
   /** Optional project key (for URL matching, defaults to "*" = any) */
@@ -55,16 +63,26 @@ export interface DurableStreamServer {
  *
  * @example
  * ```typescript
+ * const swarmMail = await createInMemorySwarmMailLibSQL("my-project");
  * const adapter = createDurableStreamAdapter(swarmMail, "/my/project");
- * const server = createDurableStreamServer({ adapter });
+ * const db = await swarmMail.getDatabase();
+ * const hiveAdapter = createHiveAdapter(db, "/my/project");
+ * 
+ * const server = createDurableStreamServer({ 
+ *   adapter, 
+ *   hiveAdapter, 
+ *   projectKey: "/my/project" 
+ * });
  * await server.start();
+ * 
  * console.log(`Streaming at ${server.url}/streams/my-project`);
+ * console.log(`Cells API at ${server.url}/cells`);
  * ```
  */
 export function createDurableStreamServer(
   config: DurableStreamServerConfig,
 ): DurableStreamServer {
-  const { adapter, port = 4483, projectKey: configProjectKey } = config;
+  const { adapter, hiveAdapter, port = 4483, projectKey: configProjectKey } = config;
 
   let bunServer: BunServer | null = null;
   const subscriptions = new Map<
@@ -83,6 +101,32 @@ export function createDurableStreamServer(
       idleTimeout: 120, // 2 minutes for SSE connections
       async fetch(req: Request) {
         const url = new URL(req.url);
+
+        // Route: GET /cells
+        if (url.pathname === "/cells") {
+          if (!hiveAdapter) {
+            return new Response(
+              JSON.stringify({ error: "HiveAdapter not configured" }),
+              { status: 500, headers: { "Content-Type": "application/json" } },
+            );
+          }
+
+          try {
+            const cells = await hiveAdapter.queryCells(
+              configProjectKey || "",
+              { include_children: true },
+            );
+            return new Response(JSON.stringify(cells), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          } catch (error) {
+            return new Response(
+              JSON.stringify({ error: "Failed to query cells" }),
+              { status: 500, headers: { "Content-Type": "application/json" } },
+            );
+          }
+        }
 
         // Parse route: /streams/:projectKey
         const match = url.pathname.match(/^\/streams\/(.+)$/);

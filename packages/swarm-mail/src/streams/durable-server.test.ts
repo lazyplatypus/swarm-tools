@@ -18,6 +18,8 @@ import {
   createDurableStreamServer,
   type DurableStreamServer,
 } from "./durable-server.js";
+import { createHiveAdapter } from "../hive/adapter.js";
+import type { HiveAdapter } from "../types/hive-adapter.js";
 
 // ============================================================================
 // Factory Function Tests
@@ -467,6 +469,93 @@ describe("DurableStreamServer project filtering", () => {
       `${server.url}/streams/${encodeURIComponent("/other/project")}`,
     );
     expect(response.status).toBe(404);
+  });
+});
+
+// ============================================================================
+// GET /cells Endpoint Tests
+// ============================================================================
+
+describe("DurableStreamServer GET /cells endpoint", () => {
+  let swarmMail: SwarmMailAdapter;
+  let adapter: DurableStreamAdapter;
+  let hiveAdapter: HiveAdapter;
+  let server: DurableStreamServer;
+  const projectKey = "/cells/test";
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL("durable-cells-test");
+    const db = await swarmMail.getDatabase();
+    adapter = createDurableStreamAdapter(swarmMail, projectKey);
+    hiveAdapter = createHiveAdapter(db, projectKey);
+    
+    // Run hive migrations
+    await hiveAdapter.runMigrations();
+    
+    server = createDurableStreamServer({ 
+      adapter, 
+      hiveAdapter, 
+      port: 0, 
+      projectKey 
+    });
+    await server.start();
+  });
+
+  afterAll(async () => {
+    await server.stop();
+    await swarmMail.close();
+  });
+
+  test("GET /cells returns JSON array", async () => {
+    const response = await fetch(`${server.url}/cells`);
+    
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    
+    const cells = await response.json();
+    expect(Array.isArray(cells)).toBe(true);
+  });
+
+  test("GET /cells returns empty array when no cells exist", async () => {
+    const response = await fetch(`${server.url}/cells`);
+    const cells = await response.json();
+    
+    expect(cells).toEqual([]);
+  });
+
+  test("GET /cells returns created cells", async () => {
+    // Create a cell
+    const cell = await hiveAdapter.createCell(projectKey, {
+      title: "Test Cell",
+      description: "Test description",
+      type: "task",
+      priority: 2,
+    });
+    
+    const response = await fetch(`${server.url}/cells`);
+    const cells = await response.json();
+    
+    expect(cells.length).toBeGreaterThan(0);
+    expect(cells[0].id).toBe(cell.id);
+    expect(cells[0].title).toBe("Test Cell");
+  });
+
+  test("GET /cells without hiveAdapter returns 500", async () => {
+    // Create server without hiveAdapter
+    const noHiveServer = createDurableStreamServer({ 
+      adapter, 
+      port: 0, 
+      projectKey 
+    });
+    await noHiveServer.start();
+    
+    const response = await fetch(`${noHiveServer.url}/cells`);
+    expect(response.status).toBe(500);
+    
+    const error = await response.json();
+    expect(error.error).toContain("HiveAdapter");
+    
+    await noHiveServer.stop();
   });
 });
 

@@ -1,61 +1,123 @@
 /**
  * API client tests
  * 
- * TDD tests for swarm-mail data fetching
+ * Tests for tree-building and sorting logic. Network behavior is tested via component tests.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { getCells } from "./api";
-import type { Cell } from "../components/CellNode";
 
-describe("getCells API function", () => {
-  test("returns empty array when no cells exist", async () => {
+describe("getCells tree building logic", () => {
+  let fetchSpy: any;
+
+  beforeEach(() => {
+    // Mock fetch for each test
+    fetchSpy = spyOn(globalThis, "fetch");
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  test("builds parent-child tree structure", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        cells: [
+          {
+            id: "epic-1",
+            title: "Test Epic",
+            status: "in_progress",
+            priority: 0,
+            issue_type: "epic",
+          },
+          {
+            id: "task-1",
+            title: "Test Task",
+            status: "open",
+            priority: 1,
+            issue_type: "task",
+            parent_id: "epic-1",
+          },
+        ],
+      }),
+    });
+
+    const cells = await getCells("http://localhost:3001");
+
+    // Should have 1 root cell (epic)
+    expect(cells.length).toBe(1);
+    const epic = cells[0];
+    expect(epic.issue_type).toBe("epic");
+
+    // Epic should have task as child
+    expect(epic.children).toBeDefined();
+    expect(epic.children?.length).toBe(1);
+    expect(epic.children?.[0].id).toBe("task-1");
+    expect(epic.children?.[0].parent_id).toBe("epic-1");
+  });
+
+  test("sorts epics first, then by priority", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        cells: [
+          {
+            id: "task-1",
+            title: "Task P0",
+            status: "open",
+            priority: 0,
+            issue_type: "task",
+          },
+          {
+            id: "epic-1",
+            title: "Epic P2",
+            status: "in_progress",
+            priority: 2,
+            issue_type: "epic",
+          },
+          {
+            id: "bug-1",
+            title: "Bug P1",
+            status: "open",
+            priority: 1,
+            issue_type: "bug",
+          },
+        ],
+      }),
+    });
+
+    const cells = await getCells("http://localhost:3001");
+
+    // Epic should be first despite higher priority number
+    expect(cells[0].issue_type).toBe("epic");
+    // Then task (P0 < P1)
+    expect(cells[1].issue_type).toBe("task");
+    expect(cells[1].priority).toBe(0);
+    // Then bug (P1)
+    expect(cells[2].issue_type).toBe("bug");
+    expect(cells[2].priority).toBe(1);
+  });
+
+  test("returns empty array on network error", async () => {
+    fetchSpy.mockRejectedValue(new TypeError("fetch failed"));
+
     const cells = await getCells("http://localhost:3001");
     expect(Array.isArray(cells)).toBe(true);
+    expect(cells.length).toBe(0);
   });
 
-  test("returns cells with correct structure", async () => {
+  test("returns empty array on 404", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+    });
+
     const cells = await getCells("http://localhost:3001");
-    
-    // Each cell should have required fields
-    for (const cell of cells) {
-      expect(cell).toHaveProperty("id");
-      expect(cell).toHaveProperty("title");
-      expect(cell).toHaveProperty("status");
-      expect(cell).toHaveProperty("priority");
-      expect(cell).toHaveProperty("issue_type");
-      expect(typeof cell.id).toBe("string");
-      expect(typeof cell.title).toBe("string");
-      expect(["open", "in_progress", "blocked", "closed"]).toContain(cell.status);
-      expect(typeof cell.priority).toBe("number");
-      expect(["epic", "task", "bug", "chore", "feature"]).toContain(cell.issue_type);
-    }
-  });
-
-  test("builds parent-child tree structure correctly", async () => {
-    const cells = await getCells("http://localhost:3001");
-    
-    // Epics should have children array
-    const epics = cells.filter(c => c.issue_type === "epic");
-    for (const epic of epics) {
-      expect(epic).toHaveProperty("children");
-      expect(Array.isArray(epic.children)).toBe(true);
-      
-      // Children should have parent_id pointing to epic
-      if (epic.children) {
-        for (const child of epic.children) {
-          expect(child.parent_id).toBe(epic.id);
-        }
-      }
-    }
-  });
-
-  test("handles network errors gracefully", async () => {
-    // Invalid URL should throw or return empty array
-    try {
-      await getCells("http://localhost:99999");
-    } catch (error) {
-      expect(error).toBeDefined();
-    }
+    expect(Array.isArray(cells)).toBe(true);
+    expect(cells.length).toBe(0);
   });
 });

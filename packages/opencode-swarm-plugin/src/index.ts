@@ -515,6 +515,7 @@ export const allTools = {
   ...skillsTools,
   ...mandateTools,
   ...memoryTools,
+  ...observabilityTools,
 } as const;
 
 /**
