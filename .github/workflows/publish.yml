@@ -40,14 +40,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read changelog
+      - name: Get release info
         if: steps.changesets.outputs.published == 'true'
-        id: changelog
+        id: release_info
         run: |
+          # Get changelog
           CHANGELOG=$(head -80 packages/opencode-swarm-plugin/CHANGELOG.md)
-          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Get the PR that was just merged (the version bump PR)
+          # The commit message from changesets is "chore: update versions"
+          PR_URL=$(gh pr list --state merged --limit 1 --json url --jq '.[0].url')
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate release tweet
         if: steps.changesets.outputs.published == 'true'
@@ -79,9 +87,10 @@ jobs:
             INPUT: Fixed parallel swarm spawning and eval scoring
             OUTPUT: 🐝 v0.40.0 - parallel workers actually spawn in parallel now. Evals score what matters.
             
-            Now write ONE tweet for this changelog. Output ONLY the tweet, nothing else:
+            Now write ONE tweet for this changelog. Output ONLY the tweet, nothing else.
+            IMPORTANT: End the tweet with a space and this exact PR link: ${{ steps.release_info.outputs.pr_url }}
             
-            ${{ steps.changelog.outputs.content }}
+            ${{ steps.release_info.outputs.changelog }}
 
       - name: Post to X (API v2)
         if: steps.changesets.outputs.published == 'true' && steps.tweet.outputs.text != ''
