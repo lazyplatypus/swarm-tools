@@ -11,3 +11,4 @@ export { EventsPane } from "./EventsPane";
 export { Layout, Pane } from "./Layout";
 export { StatsGrid } from "./StatsGrid";
 export { SwarmCard } from "./SwarmCard";
+export { ThemeToggle } from "./ThemeToggle";

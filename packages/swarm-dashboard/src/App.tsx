@@ -2,9 +2,10 @@
  * Main App component - Swarm Dashboard
  * 
  * Architecture:
- * - SSE connection to localhost:4483/events for real-time updates (4483 = HIVE on phone keypad)
- * - AgentsPane and EventsPane derive state from SSE events (useMemo pattern)
- * - CellsPane polls REST API every 5s (useEffect pattern)
+ * - WebSocket connection to localhost:4483/ws for real-time updates (4483 = HIVE on phone keypad)
+ * - Uses partysocket for battle-tested reconnection logic
+ * - AgentsPane and EventsPane derive state from WS events
+ * - CellsPane polls REST API every 5s
  * - Layout provides responsive 3-column grid
  */
 
@@ -12,27 +13,26 @@ import { Layout } from "./components";
 import { AgentsPane } from "./components/AgentsPane";
 import { EventsPane } from "./components/EventsPane";
 import { CellsPane } from "./components/CellsPane";
-import { useSwarmEvents } from "./hooks";
+import { useSwarmSocket } from "./hooks";
 import "./App.css";
+
+const WS_URL = "ws://localhost:4483/ws";
 
 /**
  * Swarm Dashboard - Real-time multi-agent coordination UI
  * 
  * Shows:
- * - Active agents with current tasks (SSE-driven)
- * - Live event stream with filtering (SSE-driven)
+ * - Active agents with current tasks (WebSocket-driven)
+ * - Live event stream with filtering (WebSocket-driven)
  * - Cell hierarchy tree with status (REST polling)
  */
 function App() {
-  // Connect to SSE endpoint for real-time events
-  const { events } = useSwarmEvents({
-    url: "http://localhost:4483/events",
-  });
+  const { state, events } = useSwarmSocket(WS_URL);
 
   return (
     <Layout>
       {/* AgentsPane - derives agent status from events */}
-      <AgentsPane />
+      <AgentsPane events={events} state={state} />
       
       {/* EventsPane - shows live event stream */}
       <EventsPane events={events} />

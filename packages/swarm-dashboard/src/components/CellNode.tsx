@@ -31,32 +31,64 @@ const STATUS_ICONS: Record<Cell['status'], string> = {
 };
 
 /**
- * Priority badge component
+ * Status colors using Catppuccin palette
+ */
+const STATUS_COLORS: Record<Cell['status'], string> = {
+  open: 'var(--foreground1)',
+  in_progress: 'var(--yellow, #f9e2af)',
+  closed: 'var(--green, #a6e3a1)',
+  blocked: 'var(--red, #f38ba8)',
+};
+
+/**
+ * Priority badge component with Catppuccin colors
  */
 const PriorityBadge = ({ priority }: { priority: number }) => {
-  const colors: Record<number, string> = {
-    0: 'bg-red-500 text-white',
-    1: 'bg-orange-500 text-white',
-    2: 'bg-yellow-500 text-black',
-    3: 'bg-gray-400 text-black',
+  const colors: Record<number, { bg: string; text: string }> = {
+    0: { bg: 'var(--red, #f38ba8)', text: 'var(--base, #1e1e2e)' },
+    1: { bg: 'var(--peach, #fab387)', text: 'var(--base, #1e1e2e)' },
+    2: { bg: 'var(--yellow, #f9e2af)', text: 'var(--base, #1e1e2e)' },
+    3: { bg: 'var(--surface2, #585b70)', text: 'var(--text, #cdd6f4)' },
   };
 
+  const color = colors[priority] || colors[3];
+
   return (
-    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${colors[priority] || colors[3]}`}>
+    <span
+      style={{
+        padding: '0.125rem 0.375rem',
+        borderRadius: '0.25rem',
+        fontSize: '0.75rem',
+        fontWeight: 500,
+        backgroundColor: color.bg,
+        color: color.text,
+      }}
+    >
       P{priority}
     </span>
   );
 };
 
 /**
+ * Issue type badge with subtle styling
+ */
+const TypeBadge = ({ type }: { type: Cell['issue_type'] }) => {
+  return (
+    <span
+      style={{
+        fontSize: '0.625rem',
+        color: 'var(--foreground2)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+      }}
+    >
+      {type}
+    </span>
+  );
+};
+
+/**
  * Recursive tree node component for displaying cells
- * 
- * Features:
- * - Expandable epics with chevron indicator
- * - Status icons (○ open, ◐ in_progress, ● closed, ⊘ blocked)
- * - Priority badges (P0-P3)
- * - Click to select with highlight
- * - Indentation based on tree depth
  */
 export const CellNode = ({ cell, depth = 0, isSelected = false, onSelect }: CellNodeProps) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -75,42 +107,87 @@ export const CellNode = ({ cell, depth = 0, isSelected = false, onSelect }: Cell
   };
 
   return (
-    <div className="select-none">
+    <div>
       {/* Node row */}
       <button
         type="button"
-        className={`
-          w-full flex items-center gap-2 px-3 py-2 cursor-pointer
-          hover:bg-gray-100 dark:hover:bg-gray-800
-          ${isSelected ? 'bg-blue-100 dark:bg-blue-900' : ''}
-          transition-colors text-left border-0
-        `}
-        style={{ paddingLeft: `${depth * 1.5 + 0.75}rem` }}
         onClick={handleClick}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.5rem 0.75rem',
+          paddingLeft: `${depth * 1.25 + 0.75}rem`,
+          cursor: 'pointer',
+          backgroundColor: isSelected ? 'var(--surface1, #45475a)' : 'transparent',
+          border: 'none',
+          textAlign: 'left',
+          transition: 'background-color 0.15s',
+        }}
+        onMouseEnter={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'var(--surface0, #313244)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }
+        }}
       >
         {/* Expand/collapse chevron for epics */}
         {isEpic && hasChildren ? (
           <button
             type="button"
             onClick={handleToggle}
-            className="w-4 h-4 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+            style={{
+              width: '1rem',
+              height: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--foreground2)',
+              padding: 0,
+              fontSize: '0.75rem',
+              transition: 'transform 0.15s',
+              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            }}
             aria-label={isExpanded ? 'Collapse' : 'Expand'}
           >
-            <span className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-              ▶
-            </span>
+            ▶
           </button>
         ) : (
-          <span className="w-4" /> // Spacer for alignment
+          <span style={{ width: '1rem' }} />
         )}
 
         {/* Status icon */}
-        <span className="text-lg leading-none" title={cell.status}>
+        <span
+          style={{
+            fontSize: '1rem',
+            lineHeight: 1,
+            color: STATUS_COLORS[cell.status],
+          }}
+          title={cell.status}
+        >
           {STATUS_ICONS[cell.status]}
         </span>
 
         {/* Cell title */}
-        <span className={`flex-1 text-sm ${isEpic ? 'font-semibold' : 'font-normal'}`}>
+        <span
+          style={{
+            flex: 1,
+            fontSize: '0.875rem',
+            fontWeight: isEpic ? 600 : 400,
+            color: 'var(--foreground0)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {cell.title}
         </span>
 
@@ -118,9 +195,7 @@ export const CellNode = ({ cell, depth = 0, isSelected = false, onSelect }: Cell
         <PriorityBadge priority={cell.priority} />
 
         {/* Issue type badge */}
-        <span className="text-xs text-gray-500 dark:text-gray-400 uppercase">
-          {cell.issue_type}
-        </span>
+        <TypeBadge type={cell.issue_type} />
       </button>
 
       {/* Children (recursive) */}

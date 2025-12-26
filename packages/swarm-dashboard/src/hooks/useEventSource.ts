@@ -57,6 +57,25 @@ export function useEventSource(
   const retryTimeoutRef = useRef<number | null>(null);
   const retryDelayRef = useRef(initialRetryDelay);
   const unmountedRef = useRef(false);
+  
+  // Store callbacks in refs to avoid reconnection on callback changes
+  // This is the key fix - callbacks changing shouldn't trigger reconnect
+  const onMessageRef = useRef(onMessage);
+  const onOpenRef = useRef(onOpen);
+  const onErrorRef = useRef(onError);
+  
+  // Update refs when callbacks change (without triggering reconnect)
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
+  
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
+  
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const connect = useCallback(() => {
     if (!url || unmountedRef.current) return;
@@ -91,7 +110,8 @@ export function useEventSource(
         // Reset retry delay on successful connection
         retryDelayRef.current = initialRetryDelay;
         
-        onOpen?.();
+        // Use ref to get latest callback without causing reconnect
+        onOpenRef.current?.();
       };
 
       es.onmessage = (event: MessageEvent) => {
@@ -105,7 +125,8 @@ export function useEventSource(
           }));
         }
         
-        onMessage?.(event);
+        // Use ref to get latest callback without causing reconnect
+        onMessageRef.current?.(event);
       };
 
       es.onerror = () => {
@@ -120,7 +141,8 @@ export function useEventSource(
           retryCount: prev.retryCount + 1,
         }));
         
-        onError?.(error);
+        // Use ref to get latest callback without causing reconnect
+        onErrorRef.current?.(error);
         
         // Close the connection
         es.close();
@@ -150,13 +172,13 @@ export function useEventSource(
         error: error instanceof Error ? error : new Error(String(error)),
       }));
       
-      onError?.(
+      onErrorRef.current?.(
         error instanceof Error ? error : new Error(String(error))
       );
     }
-  // Remove state.lastEventId from deps - it causes infinite re-renders
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, reconnect, initialRetryDelay, maxRetryDelay, onMessage, onOpen, onError]);
+  // Callbacks are stored in refs, so they don't need to be dependencies
+  // This prevents reconnection when callbacks change (the key fix!)
+  }, [url, reconnect, initialRetryDelay, maxRetryDelay]);
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

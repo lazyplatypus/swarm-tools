@@ -12,6 +12,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@webtui/css": "^0.0.3",
+    "@webtui/theme-catppuccin": "^0.0.3",
+    "partysocket": "^1.1.10",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "swarm-mail": "workspace:*"

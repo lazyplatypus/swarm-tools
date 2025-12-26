@@ -2,6 +2,7 @@
  * Individual event row component
  * 
  * Displays a single event with timestamp, type badge, agent name, and summary
+ * Uses WebTUI/Catppuccin theme variables for dark/light mode
  */
 
 import type { AgentEvent } from "../lib/types";
@@ -24,46 +25,46 @@ function formatTime(timestamp: number): string {
 }
 
 /**
- * Get badge color classes based on event type
+ * Get badge colors based on event type using Catppuccin palette
  */
-function getBadgeColor(eventType: AgentEvent["type"]): string {
-  const colorMap: Record<string, string> = {
-    // Agent events - Blue
-    agent_registered: "bg-blue-100 text-blue-800",
-    agent_active: "bg-blue-100 text-blue-800",
+function getBadgeColors(eventType: AgentEvent["type"]): { bg: string; text: string } {
+  const colorMap: Record<string, { bg: string; text: string }> = {
+    // Agent events - Blue/Sapphire
+    agent_registered: { bg: "var(--sapphire, #74c7ec)", text: "var(--base, #1e1e2e)" },
+    agent_active: { bg: "var(--sapphire, #74c7ec)", text: "var(--base, #1e1e2e)" },
 
     // Task completion - Green
-    task_completed: "bg-green-100 text-green-800",
+    task_completed: { bg: "var(--green, #a6e3a1)", text: "var(--base, #1e1e2e)" },
 
-    // Task start/progress - Yellow
-    task_started: "bg-yellow-100 text-yellow-800",
-    task_progress: "bg-yellow-100 text-yellow-800",
+    // Task start/progress - Yellow/Peach
+    task_started: { bg: "var(--peach, #fab387)", text: "var(--base, #1e1e2e)" },
+    task_progress: { bg: "var(--yellow, #f9e2af)", text: "var(--base, #1e1e2e)" },
 
     // Task blocked - Red
-    task_blocked: "bg-red-100 text-red-800",
+    task_blocked: { bg: "var(--red, #f38ba8)", text: "var(--base, #1e1e2e)" },
 
-    // Messages - Purple
-    message_sent: "bg-purple-100 text-purple-800",
-    message_read: "bg-purple-100 text-purple-800",
-    message_acked: "bg-purple-100 text-purple-800",
+    // Messages - Mauve/Purple
+    message_sent: { bg: "var(--mauve, #cba6f7)", text: "var(--base, #1e1e2e)" },
+    message_read: { bg: "var(--mauve, #cba6f7)", text: "var(--base, #1e1e2e)" },
+    message_acked: { bg: "var(--lavender, #b4befe)", text: "var(--base, #1e1e2e)" },
 
-    // File operations - Gray
-    file_reserved: "bg-gray-100 text-gray-800",
-    file_released: "bg-gray-100 text-gray-800",
+    // File operations - Overlay
+    file_reserved: { bg: "var(--surface2, #585b70)", text: "var(--text, #cdd6f4)" },
+    file_released: { bg: "var(--surface1, #45475a)", text: "var(--text, #cdd6f4)" },
 
-    // Decomposition/outcomes - Cyan
-    decomposition_generated: "bg-cyan-100 text-cyan-800",
-    subtask_outcome: "bg-cyan-100 text-cyan-800",
+    // Decomposition/outcomes - Teal
+    decomposition_generated: { bg: "var(--teal, #94e2d5)", text: "var(--base, #1e1e2e)" },
+    subtask_outcome: { bg: "var(--sky, #89dceb)", text: "var(--base, #1e1e2e)" },
 
-    // Checkpoints - Indigo
-    swarm_checkpointed: "bg-indigo-100 text-indigo-800",
-    swarm_recovered: "bg-indigo-100 text-indigo-800",
+    // Checkpoints - Blue
+    swarm_checkpointed: { bg: "var(--blue, #89b4fa)", text: "var(--base, #1e1e2e)" },
+    swarm_recovered: { bg: "var(--blue, #89b4fa)", text: "var(--base, #1e1e2e)" },
 
-    // Human feedback - Amber
-    human_feedback: "bg-amber-100 text-amber-800",
+    // Human feedback - Flamingo
+    human_feedback: { bg: "var(--flamingo, #f2cdcd)", text: "var(--base, #1e1e2e)" },
   };
 
-  return colorMap[eventType] || "bg-gray-100 text-gray-800";
+  return colorMap[eventType] || { bg: "var(--surface1, #45475a)", text: "var(--text, #cdd6f4)" };
 }
 
 /**
@@ -106,7 +107,6 @@ function getEventSummary(event: AgentEvent): string {
     case "swarm_recovered":
       return `Recovered ${event.bead_id}`;
     default: {
-      // Exhaustive check - should never reach here if all event types are handled
       const _exhaustive: never = event;
       return String(_exhaustive);
     }
@@ -114,14 +114,12 @@ function getEventSummary(event: AgentEvent): string {
 }
 
 /**
- * Get agent name from event (different events have different field names)
+ * Get agent name from event
  */
 function getAgentName(event: AgentEvent): string | undefined {
-  // Use type guard for agent_name
   if ("agent_name" in event && typeof event.agent_name === "string") {
     return event.agent_name;
   }
-  // Use type guard for from_agent
   if ("from_agent" in event && typeof event.from_agent === "string") {
     return event.from_agent;
   }
@@ -131,18 +129,44 @@ function getAgentName(event: AgentEvent): string | undefined {
 export function EventRow({ event }: EventRowProps) {
   const agentName = getAgentName(event);
   const summary = getEventSummary(event);
+  const badgeColors = getBadgeColors(event.type);
 
   return (
-    <div className="flex items-start gap-3 px-4 py-2 border-b border-gray-100 hover:bg-gray-50 text-sm">
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "0.75rem",
+        padding: "0.5rem 1rem",
+        borderBottom: "1px solid var(--surface0, #313244)",
+        fontSize: "0.875rem",
+      }}
+    >
       {/* Timestamp */}
-      <div className="text-xs text-gray-500 font-mono w-20 flex-shrink-0 pt-0.5">
+      <div
+        style={{
+          fontSize: "0.75rem",
+          color: "var(--foreground2)",
+          fontFamily: "monospace",
+          width: "5rem",
+          flexShrink: 0,
+          paddingTop: "0.125rem",
+        }}
+      >
         {formatTime(event.timestamp)}
       </div>
 
       {/* Event type badge */}
-      <div className="flex-shrink-0">
+      <div style={{ flexShrink: 0 }}>
         <span
-          className={`px-2 py-0.5 text-xs font-medium rounded ${getBadgeColor(event.type)}`}
+          style={{
+            padding: "0.125rem 0.5rem",
+            fontSize: "0.75rem",
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            backgroundColor: badgeColors.bg,
+            color: badgeColors.text,
+          }}
         >
           {event.type}
         </span>
@@ -150,13 +174,33 @@ export function EventRow({ event }: EventRowProps) {
 
       {/* Agent name */}
       {agentName && (
-        <div className="text-gray-700 font-medium w-32 flex-shrink-0 truncate pt-0.5">
+        <div
+          style={{
+            color: "var(--foreground0)",
+            fontWeight: 500,
+            width: "8rem",
+            flexShrink: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            paddingTop: "0.125rem",
+          }}
+        >
           {agentName}
         </div>
       )}
 
       {/* Summary */}
-      <div className="text-gray-600 flex-1 pt-0.5 break-words">{summary}</div>
+      <div
+        style={{
+          color: "var(--foreground1)",
+          flex: 1,
+          paddingTop: "0.125rem",
+          wordBreak: "break-word",
+        }}
+      >
+        {summary}
+      </div>
     </div>
   );
 }

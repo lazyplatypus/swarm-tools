@@ -168,6 +168,44 @@ export interface HumanFeedbackEvent extends BaseEvent {
 }
 
 // ============================================================================
+// Cell Events
+// ============================================================================
+
+export interface CellCreatedEvent extends BaseEvent {
+  type: "cell_created";
+  cell_id: string;
+  title: string;
+  description?: string | null;
+  issue_type?: string;
+  priority?: number;
+  parent_id?: string | null;
+  created_by?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface CellUpdatedEvent extends BaseEvent {
+  type: "cell_updated";
+  cell_id: string;
+  title?: string;
+  description?: string | null;
+  priority?: number;
+  status?: string;
+}
+
+export interface CellStatusChangedEvent extends BaseEvent {
+  type: "cell_status_changed";
+  cell_id: string;
+  old_status: string;
+  new_status: string;
+}
+
+export interface CellClosedEvent extends BaseEvent {
+  type: "cell_closed";
+  cell_id: string;
+  reason?: string;
+}
+
+// ============================================================================
 // Swarm Checkpoint Events
 // ============================================================================
 

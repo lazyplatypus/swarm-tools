@@ -1,8 +1,8 @@
 /**
  * Durable Streams HTTP Server
  *
- * Exposes the Durable Streams protocol via Server-Sent Events (SSE).
- * Built with Bun.serve() for HTTP server.
+ * Exposes the Durable Streams protocol via WebSocket (primary) and SSE (fallback).
+ * Built with Bun.serve() for HTTP server with native WebSocket support.
  *
  * Port 4483 = HIVE on phone keypad
  *
@@ -12,6 +12,15 @@
  * - Returns all cells from the hive as JSON object: { cells: HiveCell[] }
  * - Requires hiveAdapter to be configured
  * - Returns tree structure with parent-child relationships
+ *
+ * WS /ws
+ * - WebSocket endpoint for real-time event streaming (PREFERRED)
+ * - Sends heartbeat every 30s to keep connection alive
+ * - Client can send: { type: "subscribe", offset?: number }
+ * - Server sends: { type: "event", ...StreamEvent } or { type: "heartbeat" }
+ *
+ * GET /events (SSE fallback)
+ * - Server-Sent Events stream for browsers without WebSocket
  *
  * GET /streams/:projectKey?offset=N&live=true
  * - offset: Start reading from this sequence (default 0)
@@ -25,12 +34,18 @@
  * { offset: number, data: string, timestamp: number }
  */
 
-import type { Server } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 import type { DurableStreamAdapter, StreamEvent } from "./durable-adapter.js";
 import type { HiveAdapter } from "../types/hive-adapter.js";
 
-// Bun Server type without WebSocket data
-type BunServer = Server<undefined>;
+// WebSocket client data
+interface WSClientData {
+  subscriptionId: number;
+  unsubscribe?: () => void;
+}
+
+// Bun Server type with WebSocket data
+type BunServer = Server<WSClientData>;
 
 // CORS headers for cross-origin requests (dashboard at :5173, server at :4483)
 const CORS_HEADERS = {
@@ -38,6 +53,9 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+
+// Heartbeat interval (30 seconds)
+const HEARTBEAT_INTERVAL = 30000;
 
 /**
  * Configuration for the Durable Stream HTTP server
@@ -97,21 +115,97 @@ export function createDurableStreamServer(
     { unsubscribe: () => void; controller: ReadableStreamDefaultController }
   >();
   let subscriptionCounter = 0;
+  
+  // WebSocket clients for heartbeat
+  const wsClients = new Set<ServerWebSocket<WSClientData>>();
+  let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   async function start(): Promise<void> {
     if (bunServer) {
       throw new Error("Server is already running");
     }
 
-    bunServer = Bun.serve({
+    bunServer = Bun.serve<WSClientData>({
       port,
       idleTimeout: 120, // 2 minutes for SSE connections
-      async fetch(req: Request) {
+      
+      // WebSocket handlers
+      websocket: {
+        open(ws) {
+          wsClients.add(ws);
+          console.log(`[WS] Client connected (${wsClients.size} total)`);
+          
+          // Send initial connection confirmation
+          ws.send(JSON.stringify({ type: "connected", timestamp: Date.now() }));
+        },
+        
+        async message(ws, message) {
+          try {
+            const data = JSON.parse(message.toString());
+            
+            if (data.type === "subscribe") {
+              const offset = data.offset ?? 0;
+              
+              // Send existing events first
+              const existingEvents = await adapter.read(offset, 1000);
+              for (const event of existingEvents) {
+                ws.send(JSON.stringify({ type: "event", ...event }));
+              }
+              
+              // Subscribe to new events
+              const unsubscribe = adapter.subscribe(
+                (event: StreamEvent) => {
+                  if (event.offset > offset) {
+                    try {
+                      ws.send(JSON.stringify({ type: "event", ...event }));
+                    } catch (error) {
+                      console.error("[WS] Error sending event:", error);
+                    }
+                  }
+                },
+                offset,
+              );
+              
+              // Store unsubscribe function
+              ws.data.unsubscribe = unsubscribe;
+              
+              console.log(`[WS] Client subscribed from offset ${offset}`);
+            }
+            
+            if (data.type === "ping") {
+              ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+            }
+          } catch (error) {
+            console.error("[WS] Error parsing message:", error);
+          }
+        },
+        
+        close(ws) {
+          wsClients.delete(ws);
+          if (ws.data.unsubscribe) {
+            ws.data.unsubscribe();
+          }
+          console.log(`[WS] Client disconnected (${wsClients.size} remaining)`);
+        },
+      },
+      
+      async fetch(req: Request, server) {
         const url = new URL(req.url);
 
         // Handle CORS preflight
         if (req.method === "OPTIONS") {
           return new Response(null, { status: 204, headers: CORS_HEADERS });
+        }
+        
+        // WebSocket upgrade: GET /ws
+        if (url.pathname === "/ws") {
+          const upgraded = server.upgrade(req, {
+            data: { subscriptionId: subscriptionCounter++ },
+          });
+          if (upgraded) {
+            return undefined; // Bun handles the response
+          }
+          return new Response("WebSocket upgrade failed", { status: 500, headers: CORS_HEADERS });
         }
 
         // Route: GET /cells
@@ -324,14 +418,47 @@ export function createDurableStreamServer(
         });
       },
     });
+    
+    // Start heartbeat for WebSocket clients
+    heartbeatInterval = setInterval(() => {
+      const heartbeat = JSON.stringify({ type: "heartbeat", timestamp: Date.now() });
+      for (const ws of wsClients) {
+        try {
+          ws.send(heartbeat);
+        } catch {
+          // Client disconnected, will be cleaned up in close handler
+        }
+      }
+    }, HEARTBEAT_INTERVAL);
+    
+    console.log(`[Server] Started on port ${bunServer.port} (WS: /ws, SSE: /events)`);
   }
 
   async function stop(): Promise<void> {
     if (!bunServer) {
       return;
     }
+    
+    // Stop heartbeat
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    
+    // Close all WebSocket connections
+    for (const ws of wsClients) {
+      try {
+        if (ws.data.unsubscribe) {
+          ws.data.unsubscribe();
+        }
+        ws.close(1000, "Server shutting down");
+      } catch {
+        // Already closed
+      }
+    }
+    wsClients.clear();
 
-    // Clean up all active subscriptions and close their streams
+    // Clean up all active SSE subscriptions and close their streams
     for (const { unsubscribe, controller } of subscriptions.values()) {
       unsubscribe();
       try {
@@ -345,6 +472,8 @@ export function createDurableStreamServer(
     // Stop the server
     bunServer.stop();
     bunServer = null;
+    
+    console.log("[Server] Stopped");
   }
 
   return {

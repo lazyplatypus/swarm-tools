@@ -14,13 +14,10 @@ interface CellsPaneProps {
  * Features:
  * - Tree view with expandable epics
  * - Status icons (○ open, ◐ in_progress, ● closed, ⊘ blocked)
- * - Priority badges (P0-P3)
+ * - Priority badges (P0-P3) with Catppuccin colors
  * - Cell selection with highlight
  * - Real-time data from swarm-mail hive database
  * - Auto-refresh every 5 seconds
- * 
- * @param onCellSelect - Callback when a cell is selected
- * @param apiBaseUrl - Base URL for API calls
  */
 export const CellsPane = ({ onCellSelect, apiBaseUrl = "http://localhost:4483" }: CellsPaneProps) => {
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
@@ -43,8 +40,7 @@ export const CellsPane = ({ onCellSelect, apiBaseUrl = "http://localhost:4483" }
     };
 
     fetchCells();
-    const intervalId = setInterval(fetchCells, 5000); // Refresh every 5s
-
+    const intervalId = setInterval(fetchCells, 5000);
     return () => clearInterval(intervalId);
   }, [apiBaseUrl]);
 
@@ -66,58 +62,124 @@ export const CellsPane = ({ onCellSelect, apiBaseUrl = "http://localhost:4483" }
   }, 0);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: 'var(--background1)',
+        borderRadius: '0.5rem',
+        border: '1px solid var(--surface0, #313244)',
+        overflow: 'hidden',
+      }}
+    >
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <div
+        style={{
+          padding: '0.75rem 1rem',
+          borderBottom: '1px solid var(--surface0, #313244)',
+        }}
+      >
+        <h2
+          style={{
+            fontSize: '1.125rem',
+            fontWeight: 600,
+            color: 'var(--foreground0)',
+            margin: 0,
+          }}
+        >
           Cells
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--foreground2)',
+            margin: '0.25rem 0 0',
+          }}
+        >
           {loading ? "Loading..." : `${totalCellsCount} cells · ${openCellsCount} open`}
         </p>
         {error && (
-          <p className="text-sm text-red-500 mt-1">
+          <p
+            style={{
+              fontSize: '0.875rem',
+              color: 'var(--red, #f38ba8)',
+              margin: '0.25rem 0 0',
+            }}
+          >
             {error}
           </p>
         )}
       </div>
 
       {/* Tree view */}
-      <div className="flex-1 overflow-y-auto">
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
-          <div className="flex items-center justify-center h-full text-gray-500">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--foreground2)',
+            }}
+          >
             Loading cells...
           </div>
         ) : cells.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-500">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--foreground2)',
+            }}
+          >
             No cells found
           </div>
         ) : (
-          cells.map((cell) => (
-            <CellNode
-              key={cell.id}
-              cell={cell}
-              isSelected={selectedCellId === cell.id}
-              onSelect={handleSelect}
-            />
-          ))
+          <div style={{ padding: '0.25rem 0' }}>
+            {cells.map((cell) => (
+              <CellNode
+                key={cell.id}
+                cell={cell}
+                isSelected={selectedCellId === cell.id}
+                onSelect={handleSelect}
+              />
+            ))}
+          </div>
         )}
       </div>
 
       {/* Footer with legend */}
-      <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-        <div className="flex items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
-          <span className="flex items-center gap-1">
-            <span>○</span> Open
+      <div
+        style={{
+          padding: '0.5rem 1rem',
+          borderTop: '1px solid var(--surface0, #313244)',
+          backgroundColor: 'var(--surface0, #313244)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '1rem',
+            fontSize: '0.75rem',
+            color: 'var(--foreground2)',
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ color: 'var(--foreground1)' }}>○</span> Open
           </span>
-          <span className="flex items-center gap-1">
-            <span>◐</span> In Progress
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ color: 'var(--yellow, #f9e2af)' }}>◐</span> In Progress
           </span>
-          <span className="flex items-center gap-1">
-            <span>●</span> Closed
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ color: 'var(--green, #a6e3a1)' }}>●</span> Closed
           </span>
-          <span className="flex items-center gap-1">
-            <span>⊘</span> Blocked
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <span style={{ color: 'var(--red, #f38ba8)' }}>⊘</span> Blocked
           </span>
         </div>
       </div>

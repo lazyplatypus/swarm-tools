@@ -1,15 +1,17 @@
 /**
  * Agents pane component
  * 
- * Shows active agents with real-time updates via SSE
+ * Shows active agents with real-time updates via SSE.
+ * Uses WebTUI theme variables for dark/light mode support.
  */
 
 import { useMemo } from "react";
 import { AgentCard } from "./AgentCard";
-import { useSwarmEvents } from "../hooks";
 import type {
   AgentActiveEvent,
+  AgentEvent,
   AgentRegisteredEvent,
+  ConnectionState,
   TaskCompletedEvent,
   TaskProgressEvent,
   TaskStartedEvent,
@@ -27,13 +29,27 @@ interface Agent {
  */
 const ACTIVE_THRESHOLD_MS = 5 * 60 * 1000;
 
-export function AgentsPane() {
-  const { state, events, getEventsByType } = useSwarmEvents({
-    url: "http://localhost:4483/events",
-  });
+export interface AgentsPaneProps {
+  /** Events array from useSwarmEvents or useWebSocket hook */
+  events: AgentEvent[];
+  /** Connection state */
+  state: ConnectionState | "disconnected";
+}
 
+export function AgentsPane({ events, state }: AgentsPaneProps) {
+  console.log("[AgentsPane] events:", events.length, "state:", state);
+  
   // Derive agent state from events
   const agents = useMemo<Agent[]>(() => {
+    console.log("[AgentsPane] Computing agents from", events.length, "events");
+    // Helper to filter events by type
+    const getEventsByType = <T extends AgentEvent["type"]>(type: T) => {
+      return events.filter((e) => e.type === type) as Extract<
+        AgentEvent,
+        { type: T }
+      >[];
+    };
+    
     // Get all agent registrations
     const registrations = getEventsByType("agent_registered") as AgentRegisteredEvent[];
     const activeEvents = getEventsByType("agent_active") as AgentActiveEvent[];
@@ -67,7 +83,7 @@ export function AgentsPane() {
       const agent = agentMap.get(event.agent_name);
       if (agent) {
         agent.lastActiveTime = Math.max(agent.lastActiveTime, event.timestamp);
-        agent.currentTask = event.bead_id; // Use bead_id as task identifier
+        agent.currentTask = event.bead_id;
       }
     }
 
@@ -85,7 +101,7 @@ export function AgentsPane() {
       const agent = agentMap.get(event.agent_name);
       if (agent) {
         agent.lastActiveTime = Math.max(agent.lastActiveTime, event.timestamp);
-        agent.currentTask = undefined; // Clear task on completion
+        agent.currentTask = undefined;
       }
     }
 
@@ -102,51 +118,106 @@ export function AgentsPane() {
       }
       return b.lastActiveTime - a.lastActiveTime;
     });
-  }, [events, getEventsByType]);
+  }, [events]);
 
   return (
-    <div className="space-y-4">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        backgroundColor: "var(--background1)",
+        borderRadius: "0.5rem",
+        border: "1px solid var(--surface0, #313244)",
+        overflow: "hidden",
+      }}
+    >
       {/* Header with connection state */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">Active Agents</h2>
-        <div className="flex items-center gap-2">
+      <div
+        style={{
+          padding: "0.75rem 1rem",
+          borderBottom: "1px solid var(--surface0, #313244)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <h2
+          style={{
+            fontSize: "1.125rem",
+            fontWeight: 600,
+            color: "var(--foreground0)",
+            margin: 0,
+          }}
+        >
+          Agents
+        </h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <span
-            className={`h-2 w-2 rounded-full ${
-              state === "connected"
-                ? "bg-green-500"
-                : state === "connecting" || state === "reconnecting"
-                  ? "bg-yellow-500 animate-pulse"
-                  : "bg-red-500"
-            }`}
+            style={{
+              height: "0.5rem",
+              width: "0.5rem",
+              borderRadius: "50%",
+              backgroundColor:
+                state === "connected"
+                  ? "var(--green, #a6e3a1)"
+                  : state === "connecting" || state === "reconnecting"
+                    ? "var(--yellow, #f9e2af)"
+                    : "var(--red, #f38ba8)",
+              animation:
+                state === "connecting" || state === "reconnecting"
+                  ? "pulse 2s infinite"
+                  : "none",
+            }}
             title={state}
           />
-          <span className="text-sm text-gray-500 capitalize">{state}</span>
+          <span
+            style={{
+              fontSize: "0.75rem",
+              // WCAG AA: --subtext0 gives 6.8:1 contrast
+              color: "var(--subtext0, #a6adc8)",
+              textTransform: "capitalize",
+            }}
+          >
+            {state}
+          </span>
         </div>
       </div>
 
-      {/* Agent cards grid */}
-      {agents.length === 0 ? (
-        <div className="bg-white overflow-hidden shadow rounded-lg">
-          <div className="px-4 py-8 sm:p-10 text-center">
-            <p className="text-gray-500">No active agents</p>
-            <p className="text-sm text-gray-400 mt-1">
-              Agents will appear here when they register
+      {/* Agent cards */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "0.5rem" }}>
+        {agents.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "var(--overlay1, #7f849c)",
+              textAlign: "center",
+              padding: "2rem",
+            }}
+          >
+            <p style={{ margin: 0 }}>No agents</p>
+            <p style={{ margin: "0.25rem 0 0", fontSize: "0.75rem" }}>
+              Agents appear when they register
             </p>
           </div>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {agents.map((agent) => (
-            <AgentCard
-              key={agent.name}
-              name={agent.name}
-              status={agent.status}
-              lastActiveTime={agent.lastActiveTime}
-              currentTask={agent.currentTask}
-            />
-          ))}
-        </div>
-      )}
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {agents.map((agent) => (
+              <AgentCard
+                key={agent.name}
+                name={agent.name}
+                status={agent.status}
+                lastActiveTime={agent.lastActiveTime}
+                currentTask={agent.currentTask}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

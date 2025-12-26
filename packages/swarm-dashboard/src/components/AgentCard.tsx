@@ -2,6 +2,7 @@
  * Individual agent card component
  * 
  * Displays agent name, status indicator, current task, and last active time
+ * Uses WebTUI theme variables for consistent dark/light mode support
  */
 
 interface AgentCardProps {
@@ -34,37 +35,78 @@ export function AgentCard({
   lastActiveTime,
   currentTask,
 }: AgentCardProps) {
+  const isActive = status === "active";
+  
   return (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
-      <div className="px-4 py-5 sm:p-6">
-        {/* Agent name and status indicator */}
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold text-gray-900">{name}</h3>
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-3 w-3 rounded-full ${
-                status === "active" ? "bg-green-500" : "bg-gray-400"
-              }`}
-              data-testid="status-indicator"
-              title={status === "active" ? "Active" : "Idle"}
-            />
-            <span className="text-sm text-gray-500 capitalize">{status}</span>
-          </div>
+    <div
+      style={{
+        backgroundColor: isActive ? "var(--surface0, #313244)" : "transparent",
+        border: `1px solid ${isActive ? "var(--surface1, #45475a)" : "var(--surface0, #313244)"}`,
+        borderRadius: "0.375rem",
+        padding: "0.75rem",
+        transition: "background-color 0.2s, border-color 0.2s",
+      }}
+    >
+      {/* Agent name and status */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: currentTask ? "0.5rem" : 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span
+            style={{
+              height: "0.5rem",
+              width: "0.5rem",
+              borderRadius: "50%",
+              backgroundColor: isActive ? "var(--green, #a6e3a1)" : "var(--overlay2, #9399b2)",
+            }}
+            data-testid="status-indicator"
+            title={isActive ? "Active" : "Idle"}
+          />
+          <span
+            style={{
+              fontSize: "0.875rem",
+              fontWeight: 500,
+              // WCAG AA: Use --text for active (11.4:1), --subtext0 for idle (6.8:1)
+              color: isActive ? "var(--text, #cdd6f4)" : "var(--subtext0, #a6adc8)",
+            }}
+          >
+            {name}
+          </span>
         </div>
-
-        {/* Current task */}
-        {currentTask && (
-          <div className="mb-3">
-            <p className="text-sm text-gray-600 line-clamp-2">{currentTask}</p>
-          </div>
-        )}
-
-        {/* Last active time */}
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>Last active:</span>
-          <span className="font-medium">{formatRelativeTime(lastActiveTime)}</span>
-        </div>
+        <span
+          style={{
+            fontSize: "0.75rem",
+            // WCAG AA: --subtext0 gives 6.8:1 contrast on dark bg
+            color: "var(--subtext0, #a6adc8)",
+            fontFamily: "monospace",
+          }}
+        >
+          {formatRelativeTime(lastActiveTime)}
+        </span>
       </div>
+
+      {/* Current task */}
+      {currentTask && (
+        <p
+          style={{
+            fontSize: "0.75rem",
+            // WCAG AA: --subtext1 gives 8.9:1 contrast
+            color: "var(--subtext1, #bac2de)",
+            margin: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            paddingLeft: "1rem",
+          }}
+        >
+          {currentTask}
+        </p>
+      )}
     </div>
   );
 }
