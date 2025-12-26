@@ -2522,8 +2522,8 @@ ${cyan("Commands:")}
     --port <n>          Port to listen on (default: 3001)
   swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
   swarm log       View swarm logs with filtering
-  swarm stats     Show swarm health metrics and success rates
-  swarm history   Show recent swarm activity timeline
+  swarm stats     Show swarm health metrics powered by swarm-insights (strategy success rates, patterns)
+  swarm history   Show recent swarm activity timeline with insights data
   swarm eval      Eval-driven development commands
   swarm update    Update to latest version
   swarm version   Show version and banner
@@ -2559,10 +2559,10 @@ ${cyan("Log Viewing:")}
   swarm log sessions --json            Raw JSON output for jq
 
 ${cyan("Stats & History:")}
-  swarm stats                          Show swarm health metrics (last 7 days)
+  swarm stats                          Show swarm health metrics powered by swarm-insights (last 7 days)
   swarm stats --since 24h              Show stats for custom time period
   swarm stats --json                   Output as JSON for scripting
-  swarm history                        Show recent swarms (last 10)
+  swarm history                        Show recent swarm activity timeline with insights data (last 10)
   swarm history --limit 20             Show more swarms
   swarm history --status success       Filter by success/failed/in_progress
   swarm history --strategy file-based  Filter by decomposition strategy

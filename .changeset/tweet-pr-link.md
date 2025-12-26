@@ -2,6 +2,8 @@
 "opencode-swarm-plugin": patch
 ---
 
-## Release Tweets Now Link to PR
+## Release Tweets Link to Source, PR Titles Get Smart
 
-Each tweet includes a link to the merged PR so people can see what shipped.
+- Tweets now include link to the feature PR (or commit if pushed direct to main)
+- Version bump PRs get AI-generated titles from changeset content via Opus
+- No more "chore: update versions" - titles describe what actually shipped

@@ -49,6 +49,52 @@ Done. You're swarming.
 
 ---
 
+## How Swarms Get Smarter Over Time
+
+Swarms learn from outcomes. Every completed subtask records what worked and what failed - then injects that wisdom into future prompts.
+
+### The Insights Layer
+
+**swarm-insights** is the data aggregation layer that queries historical outcomes and semantic memory to provide context-efficient summaries for coordinator and worker agents.
+
+**Three insight types:**
+
+| Type | What It Tracks | Used By |
+|------|----------------|---------|
+| **StrategyInsight** | Success rates by decomposition strategy (file-based, feature-based, risk-based) | Coordinators |
+| **FileInsight** | File-specific failure patterns and gotchas from past subtasks | Workers |
+| **PatternInsight** | Common failure patterns across all subtasks (type errors, timeouts, conflicts) | Coordinators |
+
+### How It Works
+
+**For coordinators** (strategy selection):
+```typescript
+const insights = await getStrategyInsights(swarmMail, task);
+const patterns = await getPatternInsights(swarmMail);
+const summary = formatInsightsForPrompt({ strategies: insights, patterns }, { maxTokens: 500 });
+// Injected into decomposition prompt
+```
+
+**For workers** (file-specific context):
+```typescript
+const fileInsights = await getFileInsights(swarmMail, ["src/auth.ts", "src/db.ts"]);
+const summary = formatInsightsForPrompt({ files: fileInsights }, { maxTokens: 300 });
+// Injected into worker prompt
+```
+
+**Token budgets:**
+- Coordinators: <500 tokens (strategy + pattern insights)
+- Workers: <300 tokens per file (file-specific gotchas)
+
+**Data sources:**
+- Event store (subtask outcomes, eval results)
+- Semantic memory (file-specific learnings from past debugging)
+- Anti-pattern registry (patterns with >60% failure rate)
+
+**See [swarmtools.ai/docs/insights](https://swarmtools.ai/docs) for full details.**
+
+---
+
 ## Optional But Recommended
 
 ### Semantic Memory (for pattern learning)

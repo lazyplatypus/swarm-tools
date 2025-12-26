@@ -1003,6 +1003,32 @@ const skills_execute = tool({
 });
 
 // =============================================================================
+// Swarm Insights Tools
+// =============================================================================
+
+const swarm_get_strategy_insights = tool({
+  description: "Get strategy success rates for decomposition planning. Use this when planning task decomposition to see which strategies (file-based, feature-based, risk-based) have historically succeeded or failed. Returns success rates and recommendations based on past swarm outcomes.",
+  args: {
+    task: tool.schema.string().describe("Task description to analyze for strategy recommendation"),
+  },
+  execute: (args, ctx) => execTool("swarm_get_strategy_insights", args, ctx),
+});
+
+const swarm_get_file_insights = tool({
+  description: "Get file-specific gotchas for worker context. Use this when assigning files to workers to warn them about historical failure patterns. Queries past outcomes and semantic memory for file-specific learnings (edge cases, common bugs, performance traps).",
+  args: {
+    files: tool.schema.array(tool.schema.string()).describe("File paths to get insights for"),
+  },
+  execute: (args, ctx) => execTool("swarm_get_file_insights", args, ctx),
+});
+
+const swarm_get_pattern_insights = tool({
+  description: "Get common failure patterns across swarms. Use this during planning or when debugging stuck swarms to see recurring anti-patterns (type errors, timeouts, conflicts, test failures). Returns top 5 most frequent failure patterns with recommendations.",
+  args: {},
+  execute: (args, ctx) => execTool("swarm_get_pattern_insights", args, ctx),
+});
+
+// =============================================================================
 // Plugin Export
 // =============================================================================
 
@@ -2034,6 +2060,10 @@ const SwarmPlugin: Plugin = async (
       skills_init,
       skills_add_script,
       skills_execute,
+      // Swarm Insights
+      swarm_get_strategy_insights,
+      swarm_get_file_insights,
+      swarm_get_pattern_insights,
     },
 
     // Swarm-aware compaction hook with LLM-powered continuation prompts

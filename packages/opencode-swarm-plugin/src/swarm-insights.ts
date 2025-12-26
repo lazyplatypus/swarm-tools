@@ -55,6 +55,19 @@ export interface FormatOptions {
  *
  * Queries the event store for subtask_outcome events and calculates
  * success rates by strategy. Returns recommendations based on historical data.
+ *
+ * @param swarmMail - SwarmMail adapter for database access
+ * @param _task - Task description (currently unused, reserved for future filtering)
+ * @returns Promise resolving to array of strategy insights with success rates and recommendations
+ *
+ * @example
+ * ```typescript
+ * const insights = await getStrategyInsights(swarmMail, "Add authentication");
+ * // Returns: [
+ * //   { strategy: "file-based", successRate: 85.5, totalAttempts: 12, recommendation: "..." },
+ * //   { strategy: "feature-based", successRate: 65.0, totalAttempts: 8, recommendation: "..." }
+ * // ]
+ * ```
  */
 export async function getStrategyInsights(
 	swarmMail: SwarmMailAdapter,
@@ -94,6 +107,19 @@ export async function getStrategyInsights(
 
 /**
  * Generate recommendation based on strategy and success rate.
+ *
+ * @param strategy - Strategy name (e.g., "file-based", "feature-based")
+ * @param successRate - Success rate percentage (0-100)
+ * @returns Recommendation string based on performance thresholds
+ *
+ * @example
+ * ```typescript
+ * getStrategyRecommendation("file-based", 85);
+ * // Returns: "file-based is performing well (85% success)"
+ *
+ * getStrategyRecommendation("feature-based", 35);
+ * // Returns: "AVOID feature-based - high failure rate (35%)"
+ * ```
  */
 function getStrategyRecommendation(strategy: string, successRate: number): string {
 	if (successRate >= 80) {
@@ -117,6 +143,18 @@ function getStrategyRecommendation(strategy: string, successRate: number): strin
  *
  * Queries the event store for failures involving these files and
  * semantic memory for file-specific gotchas.
+ *
+ * @param swarmMail - SwarmMail adapter for database access
+ * @param files - Array of file paths to analyze
+ * @returns Promise resolving to array of file-specific insights including failure counts and gotchas
+ *
+ * @example
+ * ```typescript
+ * const insights = await getFileInsights(swarmMail, ["src/auth.ts", "src/db.ts"]);
+ * // Returns: [
+ * //   { file: "src/auth.ts", failureCount: 3, lastFailure: "2025-12-20T10:30:00Z", gotchas: [...] }
+ * // ]
+ * ```
  */
 export async function getFileInsights(
 	swarmMail: SwarmMailAdapter,
@@ -166,6 +204,17 @@ export async function getFileInsights(
  *
  * In a full implementation, this would query the semantic memory
  * for file-specific learnings. For now, returns empty array.
+ *
+ * @param _swarmMail - SwarmMail adapter (currently unused)
+ * @param _file - File path to query learnings for
+ * @returns Promise resolving to array of gotcha strings (currently empty, TODO)
+ *
+ * @example
+ * ```typescript
+ * const gotchas = await getFileGotchas(swarmMail, "src/auth.ts");
+ * // TODO: Will return semantic memory learnings like:
+ * // ["OAuth tokens need 5min buffer", "Always validate refresh token expiry"]
+ * ```
  */
 async function getFileGotchas(
 	_swarmMail: SwarmMailAdapter,
@@ -186,6 +235,18 @@ async function getFileGotchas(
  *
  * Analyzes event store for recurring failure patterns and
  * queries the anti-pattern registry.
+ *
+ * @param swarmMail - SwarmMail adapter for database access
+ * @returns Promise resolving to array of pattern insights with frequency and recommendations
+ *
+ * @example
+ * ```typescript
+ * const patterns = await getPatternInsights(swarmMail);
+ * // Returns: [
+ * //   { pattern: "type_error", frequency: 5, recommendation: "Add explicit type annotations and null checks" },
+ * //   { pattern: "timeout", frequency: 3, recommendation: "Consider breaking into smaller tasks" }
+ * // ]
+ * ```
  */
 export async function getPatternInsights(
 	swarmMail: SwarmMailAdapter,
@@ -227,6 +288,18 @@ export async function getPatternInsights(
 
 /**
  * Generate recommendation for a failure pattern.
+ *
+ * @param errorType - Type of error pattern (e.g., "type_error", "timeout", "conflict")
+ * @returns Recommendation string for addressing the pattern
+ *
+ * @example
+ * ```typescript
+ * getPatternRecommendation("type_error");
+ * // Returns: "Add explicit type annotations and null checks"
+ *
+ * getPatternRecommendation("unknown_error");
+ * // Returns: "Address unknown_error issues"
+ * ```
  */
 function getPatternRecommendation(errorType: string): string {
 	// Common patterns and their recommendations
@@ -250,9 +323,20 @@ function getPatternRecommendation(errorType: string): string {
  * Produces a concise, context-efficient summary suitable for
  * inclusion in coordinator or worker prompts.
  *
- * @param bundle - Insights to format
- * @param options - Formatting options (maxTokens)
- * @returns Formatted string for prompt injection
+ * @param bundle - Insights bundle containing strategies, files, and patterns
+ * @param options - Formatting options (maxTokens defaults to 500)
+ * @returns Formatted markdown string for prompt injection, or empty string if no insights
+ *
+ * @example
+ * ```typescript
+ * const bundle = {
+ *   strategies: [{ strategy: "file-based", successRate: 85.5, totalAttempts: 12, recommendation: "..." }],
+ *   files: [{ file: "src/auth.ts", failureCount: 2, lastFailure: null, gotchas: [] }],
+ *   patterns: [{ pattern: "type_error", frequency: 3, recommendation: "Add type checks" }]
+ * };
+ * const formatted = formatInsightsForPrompt(bundle, { maxTokens: 300 });
+ * // Returns formatted markdown with top 3 strategies, top 5 files, top 3 patterns
+ * ```
  */
 export function formatInsightsForPrompt(
 	bundle: InsightsBundle,
@@ -318,6 +402,25 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Get cached insights or compute fresh ones.
+ *
+ * Simple in-memory cache with 5-minute TTL to avoid redundant database queries.
+ *
+ * @param _swarmMail - SwarmMail adapter (currently unused, reserved for future cache invalidation)
+ * @param cacheKey - Unique key for caching (e.g., "strategies:task-name" or "files:src/auth.ts")
+ * @param computeFn - Function to compute fresh insights if cache miss
+ * @returns Promise resolving to cached or freshly computed insights bundle
+ *
+ * @example
+ * ```typescript
+ * const insights = await getCachedInsights(
+ *   swarmMail,
+ *   "strategies:add-auth",
+ *   async () => ({
+ *     strategies: await getStrategyInsights(swarmMail, "add auth"),
+ *   })
+ * );
+ * // First call: computes and caches. Subsequent calls within 5min: returns cached.
+ * ```
  */
 export async function getCachedInsights(
 	_swarmMail: SwarmMailAdapter,
@@ -340,6 +443,16 @@ export async function getCachedInsights(
 
 /**
  * Clear the insights cache.
+ *
+ * Useful for testing or forcing fresh insights computation.
+ *
+ * @returns void
+ *
+ * @example
+ * ```typescript
+ * clearInsightsCache();
+ * // All cached insights invalidated, next getCachedInsights() will recompute
+ * ```
  */
 export function clearInsightsCache(): void {
 	insightsCache.clear();
