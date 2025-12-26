@@ -624,7 +624,7 @@ export async function releaseAgentFiles(
     }
   }
 
-  // Create release event
+  // Create release event with context
   await appendEvent(
     createEvent("file_released", {
       project_key: projectPath,
@@ -632,6 +632,7 @@ export async function releaseAgentFiles(
       paths,
       reservation_ids: reservationIds,
       lock_holder_ids: lockHolderIds,
+      file_count: releaseCount,
     }),
     projectPath,
     db, // Pass database adapter

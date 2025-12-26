@@ -276,7 +276,43 @@ export async function sendSwarmMessage(
     dbOverride,
   } = options;
 
-  // Inline the sendMessage logic using appendEvent + createEvent
+  // Check if thread exists (for thread_created event)
+  let isNewThread = false;
+  if (threadId) {
+    const { getOrCreateAdapter } = await import("./store-drizzle");
+    const { toDrizzleDb } = await import("../libsql.convenience");
+    const { messagesTable } = await import("../db/schema/streams");
+    const { eq, count } = await import("drizzle-orm");
+    
+    const adapter = await getOrCreateAdapter(projectPath, dbOverride);
+    const swarmDb = toDrizzleDb(adapter);
+    const threadCount = await swarmDb
+      .select({ count: count() })
+      .from(messagesTable)
+      .where(eq(messagesTable.thread_id, threadId));
+    
+    isNewThread = (threadCount[0]?.count ?? 0) === 0;
+  }
+
+  // Extract epic_id from thread_id if it matches pattern (e.g., "bd-123" or "mjn...")
+  const epicId = threadId; // Assume thread_id IS the epic_id for swarm work
+  
+  // Classify message type from subject
+  let messageType: "progress" | "blocked" | "question" | "status" | "general" | undefined;
+  const subjectLower = subject.toLowerCase();
+  if (subjectLower.includes("progress") || subjectLower.includes("done") || subjectLower.includes("complete")) {
+    messageType = "progress";
+  } else if (subjectLower.includes("blocked") || subjectLower.includes("waiting")) {
+    messageType = "blocked";
+  } else if (subjectLower.includes("?") || subjectLower.includes("question")) {
+    messageType = "question";
+  } else if (subjectLower.includes("status") || subjectLower.includes("update")) {
+    messageType = "status";
+  } else {
+    messageType = "general";
+  }
+
+  // Inline the sendMessage logic using appendEvent + createEvent with enrichment
   const messageEvent = createEvent("message_sent", {
     project_key: projectPath,
     from_agent: fromAgent,
@@ -286,8 +322,26 @@ export async function sendSwarmMessage(
     thread_id: threadId,
     importance,
     ack_required: ackRequired,
+    // Thread context enrichment
+    epic_id: epicId,
+    message_type: messageType,
+    body_length: body.length,
+    recipient_count: toAgents.length,
+    is_broadcast: toAgents.length > 2,
   });
   await appendEvent(messageEvent, projectPath, dbOverride);
+
+  // Emit thread_created event if this is the first message in the thread
+  if (isNewThread && threadId) {
+    const threadCreatedEvent = createEvent("thread_created", {
+      project_key: projectPath,
+      thread_id: threadId,
+      epic_id: epicId,
+      initial_subject: subject,
+      creator_agent: fromAgent,
+    });
+    await appendEvent(threadCreatedEvent, projectPath, dbOverride);
+  }
 
   // Get the message ID from the messages table (not the event ID)
   // CRITICAL: Use same adapter as appendEvent above to avoid empty inbox bug
@@ -450,6 +504,8 @@ export async function reserveSwarmFiles(
     exclusive,
     ttl_seconds: ttlSeconds,
     expires_at: Date.now() + ttlSeconds * 1000,
+    file_count: paths.length,
+    conflict_agent: conflicts.length > 0 ? conflicts[0].holder : undefined,
   });
   await appendEvent(reserveEvent, projectPath, dbOverride);
 
@@ -516,13 +572,14 @@ export async function releaseSwarmFiles(
     releaseCount = currentReservations.length;
   }
 
-  // Create release event
+  // Create release event with context
   await appendEvent(
     createEvent("file_released", {
       project_key: projectPath,
       agent_name: agentName,
       paths,
       reservation_ids: reservationIds,
+      file_count: releaseCount,
     }),
     projectPath,
     dbOverride,
@@ -562,6 +619,82 @@ export async function acknowledgeSwarmMessage(
     acknowledged: true,
     acknowledgedAt: new Date(timestamp).toISOString(),
   };
+}
+
+// ============================================================================
+// Thread Activity Tracking
+// ============================================================================
+
+/**
+ * Emit thread_activity event for observability
+ * 
+ * Call this periodically or after significant thread changes to track:
+ * - Number of messages in thread
+ * - Number of unique participants
+ * - Last agent to send a message
+ * - Whether there are unread messages
+ * 
+ * @param projectPath - Project path
+ * @param threadId - Thread ID to track
+ * @param dbOverride - Optional database adapter
+ */
+export async function emitThreadActivity(
+  projectPath: string,
+  threadId: string,
+  dbOverride?: any,
+): Promise<void> {
+  const { getOrCreateAdapter } = await import("./store-drizzle");
+  const { toDrizzleDb } = await import("../libsql.convenience");
+  const { messagesTable, messageRecipientsTable } = await import("../db/schema/streams");
+  const { eq, count, sql } = await import("drizzle-orm");
+  
+  const adapter = await getOrCreateAdapter(projectPath, dbOverride);
+  const swarmDb = toDrizzleDb(adapter);
+  
+  // Get message count
+  const messageCountResult = await swarmDb
+    .select({ count: count() })
+    .from(messagesTable)
+    .where(eq(messagesTable.thread_id, threadId));
+  const messageCount = messageCountResult[0]?.count ?? 0;
+  
+  // Get participant count (distinct senders)
+  const participantResult = await swarmDb
+    .select({ count: sql<number>`COUNT(DISTINCT ${messagesTable.from_agent})` })
+    .from(messagesTable)
+    .where(eq(messagesTable.thread_id, threadId));
+  const participantCount = participantResult[0]?.count ?? 0;
+  
+  // Get last message agent
+  const lastMessageResult = await swarmDb
+    .select({ from_agent: messagesTable.from_agent })
+    .from(messagesTable)
+    .where(eq(messagesTable.thread_id, threadId))
+    .orderBy(sql`${messagesTable.created_at} DESC`)
+    .limit(1);
+  const lastMessageAgent = lastMessageResult[0]?.from_agent ?? "";
+  
+  // Check for unread messages (any message with null read_at)
+  const unreadResult = await swarmDb
+    .select({ count: count() })
+    .from(messageRecipientsTable)
+    .innerJoin(messagesTable, eq(messageRecipientsTable.message_id, messagesTable.id))
+    .where(
+      sql`${messagesTable.thread_id} = ${threadId} AND ${messageRecipientsTable.read_at} IS NULL`
+    );
+  const hasUnread = (unreadResult[0]?.count ?? 0) > 0;
+  
+  // Emit thread_activity event
+  const activityEvent = createEvent("thread_activity", {
+    project_key: projectPath,
+    thread_id: threadId,
+    message_count: messageCount,
+    participant_count: participantCount,
+    last_message_agent: lastMessageAgent,
+    has_unread: hasUnread,
+  });
+  
+  await appendEvent(activityEvent, projectPath, dbOverride);
 }
 
 // ============================================================================

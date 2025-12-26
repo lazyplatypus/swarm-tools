@@ -117,9 +117,25 @@ function getEventSummary(event: AgentEvent): string {
     case "cell_updated":
       return `Updated: ${event.cell_id}`;
     case "cell_status_changed":
-      return `Status: ${event.old_status} → ${event.new_status}`;
+      return `Status: ${event.from_status} → ${event.to_status}`;
     case "cell_closed":
       return event.reason ? `Closed: ${event.reason}` : "Closed";
+    case "swarm_started":
+      return `Swarm started: ${event.epic_title} (${event.subtask_count} subtasks, ${event.total_files} files)`;
+    case "worker_spawned":
+      return `Worker spawned: ${event.worker_agent} for ${event.subtask_title}`;
+    case "worker_completed":
+      return event.success
+        ? `Worker completed: ${event.worker_agent} (${event.duration_ms}ms)`
+        : `Worker failed: ${event.worker_agent} - ${event.error_message || "unknown error"}`;
+    case "review_started":
+      return `Review started: ${event.bead_id} (attempt ${event.attempt})`;
+    case "review_completed":
+      return `Review ${event.status}: ${event.bead_id} (attempt ${event.attempt})`;
+    case "swarm_completed":
+      return event.success
+        ? `Swarm completed: ${event.epic_title} (${event.subtasks_completed} completed, ${event.total_duration_ms}ms)`
+        : `Swarm failed: ${event.epic_title} (${event.subtasks_failed} failed)`;
     default: {
       const _exhaustive: never = event;
       return String(_exhaustive);

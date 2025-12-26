@@ -1654,6 +1654,30 @@ export const swarm_spawn_subtask = tool({
       console.warn("[swarm_spawn_subtask] Failed to capture worker_spawned:", error);
     }
 
+    // Emit WorkerSpawnedEvent for lifecycle tracking
+    if (args.project_path) {
+      try {
+        const { createEvent, appendEvent } = await import("swarm-mail");
+        // Track spawn order globally - simple incrementing counter
+        // In production, this should query existing events to get accurate order
+        const spawnOrder = 0; // TODO: Query existing worker_spawned events for this epic
+        const workerSpawnedEvent = createEvent("worker_spawned", {
+          project_key: args.project_path,
+          epic_id: args.epic_id,
+          bead_id: args.bead_id,
+          worker_agent: "worker", // Worker name will be set at swarmmail_init
+          subtask_title: args.subtask_title,
+          files_assigned: args.files,
+          spawn_order: spawnOrder,
+          is_parallel: false, // TODO: Detect from coordinator strategy
+        });
+        await appendEvent(workerSpawnedEvent, args.project_path);
+      } catch (error) {
+        // Non-fatal - log and continue
+        console.warn("[swarm_spawn_subtask] Failed to emit WorkerSpawnedEvent:", error);
+      }
+    }
+
     return JSON.stringify(
       {
         prompt,

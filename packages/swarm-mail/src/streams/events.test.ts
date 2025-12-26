@@ -17,6 +17,7 @@ import {
   MessageAckedEventSchema,
   FileReservedEventSchema,
   FileReleasedEventSchema,
+  FileConflictEventSchema,
   TaskStartedEventSchema,
   TaskProgressEventSchema,
   TaskCompletedEventSchema,
@@ -24,6 +25,10 @@ import {
   DecompositionGeneratedEventSchema,
   SubtaskOutcomeEventSchema,
   HumanFeedbackEventSchema,
+  SwarmCheckpointedEventSchema,
+  SwarmRecoveredEventSchema,
+  CheckpointCreatedEventSchema,
+  ContextCompactedEventSchema,
   createEvent,
   isEventType,
   type AgentEvent,
@@ -225,6 +230,41 @@ describe("FileReservedEventSchema", () => {
     };
     expect(() => FileReservedEventSchema.parse(event)).toThrow();
   });
+  
+  it("validates file_reserved with context fields", () => {
+    const event = {
+      type: "file_reserved",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      agent_name: "BlueLake",
+      paths: ["src/auth/**", "src/config.ts"],
+      reason: "bd-123.1: Auth implementation",
+      exclusive: true,
+      ttl_seconds: 3600,
+      expires_at: Date.now() + 3600000,
+      file_count: 2,
+      epic_id: "bd-123",
+      bead_id: "bd-123.1",
+      is_retry: false,
+      conflict_agent: undefined,
+    };
+    expect(() => FileReservedEventSchema.parse(event)).not.toThrow();
+  });
+  
+  it("validates file_reserved with conflict", () => {
+    const event = {
+      type: "file_reserved",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      agent_name: "BlueLake",
+      paths: ["src/auth/**"],
+      expires_at: Date.now() + 3600000,
+      file_count: 1,
+      is_retry: true,
+      conflict_agent: "RedStone",
+    };
+    expect(() => FileReservedEventSchema.parse(event)).not.toThrow();
+  });
 });
 
 describe("FileReleasedEventSchema", () => {
@@ -256,8 +296,83 @@ describe("FileReleasedEventSchema", () => {
       project_key: "/test/project",
       timestamp: Date.now(),
       agent_name: "BlueLake",
+      file_count: 0,
     };
     expect(() => FileReleasedEventSchema.parse(event)).not.toThrow();
+  });
+  
+  it("validates file_released with context fields", () => {
+    const event = {
+      type: "file_released",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      agent_name: "BlueLake",
+      paths: ["src/auth/**"],
+      file_count: 1,
+      epic_id: "bd-123",
+      bead_id: "bd-123.1",
+      hold_duration_ms: 45000,
+      files_modified: 3,
+    };
+    expect(() => FileReleasedEventSchema.parse(event)).not.toThrow();
+  });
+});
+
+describe("FileConflictEventSchema", () => {
+  it("validates a complete file_conflict event", () => {
+    const event = {
+      type: "file_conflict",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      requesting_agent: "BlueLake",
+      holding_agent: "RedStone",
+      paths: ["src/auth/**", "src/config.ts"],
+      epic_id: "bd-123",
+      bead_id: "bd-123.2",
+      resolution: "wait",
+    };
+    expect(() => FileConflictEventSchema.parse(event)).not.toThrow();
+  });
+
+  it("validates without optional fields", () => {
+    const event = {
+      type: "file_conflict",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      requesting_agent: "BlueLake",
+      holding_agent: "RedStone",
+      paths: ["src/auth/**"],
+    };
+    expect(() => FileConflictEventSchema.parse(event)).not.toThrow();
+  });
+
+  it("validates resolution enum values", () => {
+    const validResolutions = ["wait", "force", "abort"];
+    for (const resolution of validResolutions) {
+      const event = {
+        type: "file_conflict",
+        project_key: "/test/project",
+        timestamp: Date.now(),
+        requesting_agent: "BlueLake",
+        holding_agent: "RedStone",
+        paths: ["src/auth.ts"],
+        resolution,
+      };
+      expect(() => FileConflictEventSchema.parse(event)).not.toThrow();
+    }
+  });
+
+  it("rejects invalid resolution value", () => {
+    const event = {
+      type: "file_conflict",
+      project_key: "/test/project",
+      timestamp: Date.now(),
+      requesting_agent: "BlueLake",
+      holding_agent: "RedStone",
+      paths: ["src/auth.ts"],
+      resolution: "invalid",
+    };
+    expect(() => FileConflictEventSchema.parse(event)).toThrow();
   });
 });
 
@@ -920,5 +1035,338 @@ describe("Edge cases", () => {
       agent_name: "Test",
     };
     expect(() => AgentActiveEventSchema.parse(event)).not.toThrow();
+  });
+});
+
+// ============================================================================
+// Enhanced Checkpoint Events Tests  
+// ============================================================================
+
+describe("Enhanced SwarmCheckpointedEvent", () => {
+  const baseCheckpoint = {
+    project_key: "/test",
+    epic_id: "epic-123",
+    bead_id: "bead-456",
+    strategy: "file-based" as const,
+    files: ["a.ts"],
+    dependencies: [],
+    directives: {},
+    recovery: {
+      last_checkpoint: Date.now(),
+      files_modified: [],
+      progress_percent: 50,
+    },
+  };
+
+  it("accepts optional checkpoint_size_bytes", () => {
+    const event = createEvent("swarm_checkpointed", {
+      ...baseCheckpoint,
+      checkpoint_size_bytes: 4096,
+    });
+    expect(event.checkpoint_size_bytes).toBe(4096);
+  });
+
+  it("accepts optional trigger field", () => {
+    const event = createEvent("swarm_checkpointed", {
+      ...baseCheckpoint,
+      trigger: "progress",
+    });
+    expect(event.trigger).toBe("progress");
+  });
+
+  it("validates trigger enum values", () => {
+    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = ["manual", "auto", "progress", "error"];
+    for (const trigger of validTriggers) {
+      expect(() =>
+        createEvent("swarm_checkpointed", {
+          ...baseCheckpoint,
+          trigger,
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it("rejects invalid trigger value", () => {
+    expect(() =>
+      SwarmCheckpointedEventSchema.parse({
+        type: "swarm_checkpointed",
+        project_key: "/test",
+        timestamp: Date.now(),
+        ...baseCheckpoint,
+        trigger: "invalid",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts optional context token fields", () => {
+    const event = createEvent("swarm_checkpointed", {
+      ...baseCheckpoint,
+      context_tokens_before: 50000,
+      context_tokens_after: 25000,
+    });
+    expect(event.context_tokens_before).toBe(50000);
+    expect(event.context_tokens_after).toBe(25000);
+  });
+
+  it("works without optional fields (backward compatible)", () => {
+    const event = createEvent("swarm_checkpointed", baseCheckpoint);
+    expect(event.checkpoint_size_bytes).toBeUndefined();
+    expect(event.trigger).toBeUndefined();
+    expect(event.context_tokens_before).toBeUndefined();
+    expect(event.context_tokens_after).toBeUndefined();
+  });
+});
+
+describe("Enhanced SwarmRecoveredEvent", () => {
+  const baseRecovery = {
+    project_key: "/test",
+    epic_id: "epic-123",
+    bead_id: "bead-456",
+    recovered_from_checkpoint: Date.now() - 60000,
+  };
+
+  it("accepts optional recovery_duration_ms", () => {
+    const event = createEvent("swarm_recovered", {
+      ...baseRecovery,
+      recovery_duration_ms: 1500,
+    });
+    expect(event.recovery_duration_ms).toBe(1500);
+  });
+
+  it("accepts optional checkpoint_age_ms", () => {
+    const event = createEvent("swarm_recovered", {
+      ...baseRecovery,
+      checkpoint_age_ms: 60000,
+    });
+    expect(event.checkpoint_age_ms).toBe(60000);
+  });
+
+  it("accepts optional files_restored array", () => {
+    const event = createEvent("swarm_recovered", {
+      ...baseRecovery,
+      files_restored: ["src/a.ts", "src/b.ts"],
+    });
+    expect(event.files_restored).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("accepts optional context_restored_tokens", () => {
+    const event = createEvent("swarm_recovered", {
+      ...baseRecovery,
+      context_restored_tokens: 30000,
+    });
+    expect(event.context_restored_tokens).toBe(30000);
+  });
+
+  it("works without optional fields (backward compatible)", () => {
+    const event = createEvent("swarm_recovered", baseRecovery);
+    expect(event.recovery_duration_ms).toBeUndefined();
+    expect(event.checkpoint_age_ms).toBeUndefined();
+    expect(event.files_restored).toBeUndefined();
+    expect(event.context_restored_tokens).toBeUndefined();
+  });
+});
+
+describe("CheckpointCreatedEvent", () => {
+  it("creates valid checkpoint_created event", () => {
+    const event = createEvent("checkpoint_created", {
+      project_key: "/test",
+      epic_id: "epic-123",
+      bead_id: "bead-456",
+      agent_name: "TestAgent",
+      checkpoint_id: "ckpt-789",
+      trigger: "manual",
+      progress_percent: 50,
+      files_snapshot: ["src/a.ts", "src/b.ts"],
+    });
+
+    expect(event.type).toBe("checkpoint_created");
+    expect(event.checkpoint_id).toBe("ckpt-789");
+    expect(event.trigger).toBe("manual");
+    expect(event.progress_percent).toBe(50);
+    expect(event.files_snapshot).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("validates trigger enum for checkpoint_created", () => {
+    const validTriggers: Array<"manual" | "auto" | "progress" | "error"> = ["manual", "auto", "progress", "error"];
+    for (const trigger of validTriggers) {
+      expect(() =>
+        createEvent("checkpoint_created", {
+          project_key: "/test",
+          epic_id: "epic-123",
+          bead_id: "bead-456",
+          agent_name: "TestAgent",
+          checkpoint_id: "ckpt-789",
+          trigger,
+          progress_percent: 25,
+          files_snapshot: [],
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it("rejects invalid trigger", () => {
+    expect(() =>
+      CheckpointCreatedEventSchema.parse({
+        type: "checkpoint_created",
+        project_key: "/test",
+        timestamp: Date.now(),
+        epic_id: "epic-123",
+        bead_id: "bead-456",
+        agent_name: "TestAgent",
+        checkpoint_id: "ckpt-789",
+        trigger: "invalid",
+        progress_percent: 25,
+        files_snapshot: [],
+      }),
+    ).toThrow();
+  });
+
+  it("validates progress_percent range", () => {
+    const base = {
+      project_key: "/test",
+      epic_id: "epic-123",
+      bead_id: "bead-456",
+      agent_name: "TestAgent",
+      checkpoint_id: "ckpt-789",
+      trigger: "auto" as const,
+      files_snapshot: [],
+    };
+
+    // Valid: 0
+    expect(() =>
+      createEvent("checkpoint_created", { ...base, progress_percent: 0 }),
+    ).not.toThrow();
+
+    // Valid: 100
+    expect(() =>
+      createEvent("checkpoint_created", { ...base, progress_percent: 100 }),
+    ).not.toThrow();
+
+    // Invalid: -1
+    expect(() =>
+      CheckpointCreatedEventSchema.parse({
+        type: "checkpoint_created",
+        project_key: "/test",
+        timestamp: Date.now(),
+        ...base,
+        progress_percent: -1,
+      }),
+    ).toThrow();
+
+    // Invalid: 101
+    expect(() =>
+      CheckpointCreatedEventSchema.parse({
+        type: "checkpoint_created",
+        project_key: "/test",
+        timestamp: Date.now(),
+        ...base,
+        progress_percent: 101,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ContextCompactedEvent", () => {
+  it("creates valid context_compacted event", () => {
+    const event = createEvent("context_compacted", {
+      project_key: "/test",
+      agent_name: "TestAgent",
+      tokens_before: 50000,
+      tokens_after: 25000,
+      compression_ratio: 0.5,
+      summary_length: 1500,
+    });
+
+    expect(event.type).toBe("context_compacted");
+    expect(event.tokens_before).toBe(50000);
+    expect(event.tokens_after).toBe(25000);
+    expect(event.compression_ratio).toBe(0.5);
+    expect(event.summary_length).toBe(1500);
+  });
+
+  it("accepts optional epic_id and bead_id", () => {
+    const event = createEvent("context_compacted", {
+      project_key: "/test",
+      epic_id: "epic-123",
+      bead_id: "bead-456",
+      agent_name: "TestAgent",
+      tokens_before: 60000,
+      tokens_after: 30000,
+      compression_ratio: 0.5,
+      summary_length: 2000,
+    });
+
+    expect(event.epic_id).toBe("epic-123");
+    expect(event.bead_id).toBe("bead-456");
+  });
+
+  it("validates tokens are non-negative", () => {
+    expect(() =>
+      ContextCompactedEventSchema.parse({
+        type: "context_compacted",
+        project_key: "/test",
+        timestamp: Date.now(),
+        agent_name: "TestAgent",
+        tokens_before: -100,
+        tokens_after: 50,
+        compression_ratio: 0.5,
+        summary_length: 100,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      ContextCompactedEventSchema.parse({
+        type: "context_compacted",
+        project_key: "/test",
+        timestamp: Date.now(),
+        agent_name: "TestAgent",
+        tokens_before: 100,
+        tokens_after: -50,
+        compression_ratio: 0.5,
+        summary_length: 100,
+      }),
+    ).toThrow();
+  });
+
+  it("validates compression_ratio is between 0 and 1", () => {
+    const base = {
+      project_key: "/test",
+      agent_name: "TestAgent",
+      tokens_before: 1000,
+      tokens_after: 500,
+      summary_length: 200,
+    };
+
+    // Valid: 0
+    expect(() =>
+      createEvent("context_compacted", { ...base, compression_ratio: 0 }),
+    ).not.toThrow();
+
+    // Valid: 1
+    expect(() =>
+      createEvent("context_compacted", { ...base, compression_ratio: 1 }),
+    ).not.toThrow();
+
+    // Invalid: > 1
+    expect(() =>
+      ContextCompactedEventSchema.parse({
+        type: "context_compacted",
+        project_key: "/test",
+        timestamp: Date.now(),
+        ...base,
+        compression_ratio: 1.5,
+      }),
+    ).toThrow();
+
+    // Invalid: < 0
+    expect(() =>
+      ContextCompactedEventSchema.parse({
+        type: "context_compacted",
+        project_key: "/test",
+        timestamp: Date.now(),
+        ...base,
+        compression_ratio: -0.1,
+      }),
+    ).toThrow();
   });
 });

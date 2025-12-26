@@ -982,11 +982,29 @@ export const swarm_progress = tool({
             },
           };
 
-          const event = createEvent("swarm_checkpointed", {
+          // Emit swarm_checkpointed event
+          const checkpointData = JSON.stringify(checkpoint);
+          const checkpointEvent = createEvent("swarm_checkpointed", {
             project_key: args.project_key,
             ...checkpoint,
+            checkpoint_size_bytes: Buffer.byteLength(checkpointData, "utf8"),
+            trigger: "progress",
           });
-          await appendEvent(event, args.project_key);
+          await appendEvent(checkpointEvent, args.project_key);
+
+          // Emit checkpoint_created event for observability
+          const checkpointId = `ckpt-${Date.now()}-${args.bead_id}`;
+          const createdEvent = createEvent("checkpoint_created", {
+            project_key: args.project_key,
+            epic_id: epicId,
+            bead_id: args.bead_id,
+            agent_name: args.agent_name,
+            checkpoint_id: checkpointId,
+            trigger: "progress",
+            progress_percent: args.progress_percent,
+            files_snapshot: args.files_touched,
+          });
+          await appendEvent(createdEvent, args.project_key);
 
           // NOTE: The event handler (handleSwarmCheckpointed in store.ts) updates
           // the swarm_contexts table. We follow event sourcing pattern here.
@@ -2693,6 +2711,7 @@ export const swarm_checkpoint = tool({
       };
 
       // Emit checkpoint event
+      const checkpointData = JSON.stringify(checkpoint);
       const event = createEvent("swarm_checkpointed", {
         project_key: args.project_key,
         epic_id: args.epic_id,
@@ -2702,6 +2721,8 @@ export const swarm_checkpoint = tool({
         dependencies: checkpoint.dependencies,
         directives: checkpoint.directives,
         recovery: checkpoint.recovery,
+        checkpoint_size_bytes: Buffer.byteLength(checkpointData, "utf8"),
+        trigger: args.error_context ? "error" : "manual",
       });
 
       await appendEvent(event, args.project_key);

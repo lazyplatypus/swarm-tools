@@ -431,6 +431,22 @@ export const swarm_review = tool({
         downstreamTasks.length > 0 ? downstreamTasks : undefined,
     });
 
+    // Emit ReviewStartedEvent for lifecycle tracking
+    try {
+      const { createEvent, appendEvent } = await import("swarm-mail");
+      const attempt = getReviewStatus(args.task_id).attempt_count || 1;
+      const reviewStartedEvent = createEvent("review_started", {
+        project_key: args.project_key,
+        epic_id: args.epic_id,
+        bead_id: args.task_id,
+        attempt,
+      });
+      await appendEvent(reviewStartedEvent, args.project_key);
+    } catch (error) {
+      // Non-fatal - log and continue
+      console.warn("[swarm_review] Failed to emit ReviewStartedEvent:", error);
+    }
+
     return JSON.stringify(
       {
         review_prompt: reviewPrompt,
@@ -528,6 +544,23 @@ export const swarm_review_feedback = tool({
         console.warn("[swarm_review_feedback] Failed to capture review_completed:", error);
       }
 
+      // Emit ReviewCompletedEvent for lifecycle tracking
+      try {
+        const { createEvent, appendEvent } = await import("swarm-mail");
+        const attempt = getReviewStatus(args.task_id).attempt_count || 1;
+        const reviewCompletedEvent = createEvent("review_completed", {
+          project_key: args.project_key,
+          epic_id: epicId,
+          bead_id: args.task_id,
+          status: "approved",
+          attempt,
+        });
+        await appendEvent(reviewCompletedEvent, args.project_key);
+      } catch (error) {
+        // Non-fatal - log and continue
+        console.warn("[swarm_review_feedback] Failed to emit ReviewCompletedEvent:", error);
+      }
+
       // Send approval message
       await sendSwarmMessage({
         projectPath: args.project_key,
@@ -578,6 +611,23 @@ You may now complete the task with \`swarm_complete\`.`,
     } catch (error) {
       // Non-fatal - don't block feedback if capture fails
       console.warn("[swarm_review_feedback] Failed to capture review_completed:", error);
+    }
+
+    // Emit ReviewCompletedEvent for lifecycle tracking
+    try {
+      const { createEvent, appendEvent } = await import("swarm-mail");
+      const status = remaining <= 0 ? "blocked" : "needs_changes";
+      const reviewCompletedEvent = createEvent("review_completed", {
+        project_key: args.project_key,
+        epic_id: epicId,
+        bead_id: args.task_id,
+        status,
+        attempt: attemptNumber,
+      });
+      await appendEvent(reviewCompletedEvent, args.project_key);
+    } catch (error) {
+      // Non-fatal - log and continue
+      console.warn("[swarm_review_feedback] Failed to emit ReviewCompletedEvent:", error);
     }
 
     // Check if task should fail

@@ -768,6 +768,30 @@ export const hive_create_epic = tool({
         );
       }
 
+      // Emit SwarmStartedEvent for orchestration lifecycle tracking
+      try {
+        const totalFiles = validated.subtasks.reduce(
+          (count, st) => count + (st.files?.length || 0),
+          0,
+        );
+        const swarmStartedEvent = createEvent("swarm_started", {
+          project_key: effectiveProjectKey,
+          epic_id: epic.id,
+          epic_title: validated.epic_title,
+          strategy: args.strategy || "feature-based",
+          subtask_count: validated.subtasks.length,
+          total_files: totalFiles,
+          coordinator_agent: "coordinator", // Default coordinator name
+        });
+        await appendEvent(swarmStartedEvent, effectiveProjectKey);
+      } catch (error) {
+        // Non-fatal - log and continue
+        console.warn(
+          "[hive_create_epic] Failed to emit SwarmStartedEvent:",
+          error,
+        );
+      }
+
       // Capture decomposition_complete event for eval scoring
       try {
         const { captureCoordinatorEvent } = await import("./eval-capture.js");
@@ -1018,6 +1042,10 @@ export const hive_close = tool({
       // Resolve partial ID to full ID
       const cellId = await resolvePartialId(adapter, projectKey, validated.id) || validated.id;
       
+      // Get cell details before closing to check if it's an epic
+      const cellBeforeClose = await adapter.getCell(projectKey, cellId);
+      const isEpic = cellBeforeClose?.type === "epic";
+      
       const cell = await adapter.closeCell(
         projectKey,
         cellId,
@@ -1025,6 +1053,79 @@ export const hive_close = tool({
       );
 
       await adapter.markDirty(projectKey, cellId);
+
+      // Emit SwarmCompletedEvent if this was an epic
+      if (isEpic && cellBeforeClose) {
+        try {
+          const { createEvent, appendEvent } = await import("swarm-mail");
+          
+          // Query subtasks to gather metrics
+          const subtasks = await adapter.queryCells(projectKey, { parent_id: cellId });
+          const completedSubtasks = subtasks.filter(st => st.status === "closed");
+          const failedSubtasks = subtasks.filter(st => st.status === "blocked");
+          
+          // Gather all unique files from DecompositionGeneratedEvent
+          let totalFilesTouched: string[] = [];
+          try {
+            const { readEvents } = await import("swarm-mail");
+            const decompositionEvents = await readEvents({
+              projectKey,
+              types: ["decomposition_generated"],
+            }, projectKey);
+            
+            const epicDecomp = decompositionEvents.find((e: any) => 
+              e.type === "decomposition_generated" && e.epic_id === cellId
+            );
+            
+            if (epicDecomp) {
+              const allFiles = new Set<string>();
+              for (const subtask of (epicDecomp as any).subtasks || []) {
+                for (const file of subtask.files || []) {
+                  allFiles.add(file);
+                }
+              }
+              totalFilesTouched = Array.from(allFiles);
+            }
+          } catch (error) {
+            console.warn("[hive_close] Failed to gather files from decomposition:", error);
+          }
+          
+          // Calculate total duration from swarm_started to now
+          let totalDurationMs = 0;
+          try {
+            const { readEvents } = await import("swarm-mail");
+            const swarmStartedEvents = await readEvents({
+              projectKey,
+              types: ["swarm_started"],
+            }, projectKey);
+            
+            const startEvent = swarmStartedEvents.find((e: any) => 
+              e.type === "swarm_started" && e.epic_id === cellId
+            );
+            
+            if (startEvent) {
+              totalDurationMs = Date.now() - (startEvent as any).timestamp;
+            }
+          } catch (error) {
+            console.warn("[hive_close] Failed to calculate duration:", error);
+          }
+          
+          const swarmCompletedEvent = createEvent("swarm_completed", {
+            project_key: projectKey,
+            epic_id: cellId,
+            epic_title: cellBeforeClose.title,
+            success: failedSubtasks.length === 0,
+            total_duration_ms: totalDurationMs,
+            subtasks_completed: completedSubtasks.length,
+            subtasks_failed: failedSubtasks.length,
+            total_files_touched: totalFilesTouched,
+          });
+          await appendEvent(swarmCompletedEvent, projectKey);
+        } catch (error) {
+          // Non-fatal - log and continue
+          console.warn("[hive_close] Failed to emit SwarmCompletedEvent:", error);
+        }
+      }
 
       return `Closed ${cell.id}: ${validated.reason}`;
     } catch (error) {

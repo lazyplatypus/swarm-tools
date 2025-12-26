@@ -195,8 +195,8 @@ export interface CellUpdatedEvent extends BaseEvent {
 export interface CellStatusChangedEvent extends BaseEvent {
   type: "cell_status_changed";
   cell_id: string;
-  old_status: string;
-  new_status: string;
+  from_status: string;
+  to_status: string;
 }
 
 export interface CellClosedEvent extends BaseEvent {
@@ -238,6 +238,69 @@ export interface SwarmRecoveredEvent extends BaseEvent {
 }
 
 // ============================================================================
+// Swarm Lifecycle Events
+// ============================================================================
+
+export interface SwarmStartedEvent extends BaseEvent {
+  type: "swarm_started";
+  epic_id: string;
+  epic_title: string;
+  strategy: "file-based" | "feature-based" | "risk-based";
+  subtask_count: number;
+  total_files: number;
+  coordinator_agent: string;
+}
+
+export interface WorkerSpawnedEvent extends BaseEvent {
+  type: "worker_spawned";
+  epic_id: string;
+  bead_id: string;
+  worker_agent: string;
+  subtask_title: string;
+  files_assigned: string[];
+  spawn_order: number;
+  is_parallel: boolean;
+}
+
+export interface WorkerCompletedEvent extends BaseEvent {
+  type: "worker_completed";
+  epic_id: string;
+  bead_id: string;
+  worker_agent: string;
+  success: boolean;
+  duration_ms: number;
+  files_touched: string[];
+  error_message?: string;
+}
+
+export interface ReviewStartedEvent extends BaseEvent {
+  type: "review_started";
+  epic_id: string;
+  bead_id: string;
+  attempt: number;
+}
+
+export interface ReviewCompletedEvent extends BaseEvent {
+  type: "review_completed";
+  epic_id: string;
+  bead_id: string;
+  status: "approved" | "needs_changes" | "blocked";
+  attempt: number;
+  duration_ms?: number;
+}
+
+export interface SwarmCompletedEvent extends BaseEvent {
+  type: "swarm_completed";
+  epic_id: string;
+  epic_title: string;
+  success: boolean;
+  total_duration_ms: number;
+  subtasks_completed: number;
+  subtasks_failed: number;
+  total_files_touched: string[];
+}
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
@@ -261,7 +324,13 @@ export type AgentEvent =
   | CellStatusChangedEvent
   | CellClosedEvent
   | SwarmCheckpointedEvent
-  | SwarmRecoveredEvent;
+  | SwarmRecoveredEvent
+  | SwarmStartedEvent
+  | WorkerSpawnedEvent
+  | WorkerCompletedEvent
+  | ReviewStartedEvent
+  | ReviewCompletedEvent
+  | SwarmCompletedEvent;
 
 // ============================================================================
 // Connection State

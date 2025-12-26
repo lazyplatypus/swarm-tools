@@ -580,6 +580,12 @@ async function updateMaterializedViews(
         );
         break;
 
+      // Thread events - no materialized views needed (query events directly)
+      case "thread_created":
+      case "thread_activity":
+        // No-op - these are observability events, not state changes
+        break;
+
       case "file_reserved":
         await handleFileReserved(
           db,
@@ -619,6 +625,17 @@ async function updateMaterializedViews(
 
       case "swarm_recovered":
         await handleSwarmRecovered(db, event);
+        break;
+
+      // Swarm lifecycle events - no materialized views needed (query events directly)
+      case "swarm_started":
+      case "worker_spawned":
+      case "worker_completed":
+      case "review_started":
+      case "review_completed":
+      case "swarm_completed":
+      case "file_conflict":
+        // No-op - these are observability events, not state changes
         break;
     }
   } catch (error) {
@@ -1133,6 +1150,10 @@ export async function reserveFiles(
     exclusive?: boolean;
     ttlSeconds?: number;
     lockHolderIds?: string[];
+    epicId?: string;
+    beadId?: string;
+    isRetry?: boolean;
+    conflictAgent?: string;
   } = {},
   projectPath?: string,
   dbOverride?: DatabaseAdapter,
@@ -1147,6 +1168,11 @@ export async function reserveFiles(
     ttl_seconds: ttlSeconds,
     expires_at: Date.now() + ttlSeconds * 1000,
     lock_holder_ids: options.lockHolderIds,
+    file_count: paths.length,
+    epic_id: options.epicId,
+    bead_id: options.beadId,
+    is_retry: options.isRetry,
+    conflict_agent: options.conflictAgent,
   });
 
   return appendEvent(event, projectPath, dbOverride) as Promise<

@@ -64,6 +64,13 @@ export const MessageSentEventSchema = BaseEventSchema.extend({
   thread_id: z.string().optional(),
   importance: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
   ack_required: z.boolean().default(false),
+  // Thread context enrichment for observability
+  epic_id: z.string().optional(),
+  bead_id: z.string().optional(),
+  message_type: z.enum(["progress", "blocked", "question", "status", "general"]).optional(),
+  body_length: z.number().optional(),
+  recipient_count: z.number().optional(),
+  is_broadcast: z.boolean().optional(),
 });
 
 export const MessageReadEventSchema = BaseEventSchema.extend({
@@ -76,6 +83,23 @@ export const MessageAckedEventSchema = BaseEventSchema.extend({
   type: z.literal("message_acked"),
   message_id: z.number(),
   agent_name: z.string(),
+});
+
+export const ThreadCreatedEventSchema = BaseEventSchema.extend({
+  type: z.literal("thread_created"),
+  thread_id: z.string(),
+  epic_id: z.string().optional(),
+  initial_subject: z.string(),
+  creator_agent: z.string(),
+});
+
+export const ThreadActivityEventSchema = BaseEventSchema.extend({
+  type: z.literal("thread_activity"),
+  thread_id: z.string(),
+  message_count: z.number().int().min(0),
+  participant_count: z.number().int().min(0),
+  last_message_agent: z.string(),
+  has_unread: z.boolean(),
 });
 
 // ============================================================================
@@ -96,6 +120,16 @@ export const FileReservedEventSchema = BaseEventSchema.extend({
   expires_at: z.number(),
   /** DurableLock holder IDs (one per path) */
   lock_holder_ids: z.array(z.string()).optional(),
+  /** Epic ID if part of swarm work */
+  epic_id: z.string().optional(),
+  /** Cell/bead ID if part of swarm work */
+  bead_id: z.string().optional(),
+  /** Number of files being reserved */
+  file_count: z.number().optional(),
+  /** Whether this is a retry after conflict */
+  is_retry: z.boolean().optional(),
+  /** Agent that caused a conflict (if any) */
+  conflict_agent: z.string().optional(),
 });
 
 export const FileReleasedEventSchema = BaseEventSchema.extend({
@@ -107,6 +141,32 @@ export const FileReleasedEventSchema = BaseEventSchema.extend({
   reservation_ids: z.array(z.number()).optional(),
   /** DurableLock holder IDs to release */
   lock_holder_ids: z.array(z.string()).optional(),
+  /** Epic ID if part of swarm work */
+  epic_id: z.string().optional(),
+  /** Cell/bead ID if part of swarm work */
+  bead_id: z.string().optional(),
+  /** Number of files being released */
+  file_count: z.number().optional(),
+  /** How long files were held (milliseconds) */
+  hold_duration_ms: z.number().optional(),
+  /** How many files were actually modified */
+  files_modified: z.number().optional(),
+});
+
+export const FileConflictEventSchema = BaseEventSchema.extend({
+  type: z.literal("file_conflict"),
+  /** Agent requesting the files */
+  requesting_agent: z.string(),
+  /** Agent currently holding the files */
+  holding_agent: z.string(),
+  /** Paths that are in conflict */
+  paths: z.array(z.string()),
+  /** Epic ID if part of swarm work */
+  epic_id: z.string().optional(),
+  /** Cell/bead ID if part of swarm work */
+  bead_id: z.string().optional(),
+  /** How the conflict was resolved */
+  resolution: z.enum(["wait", "force", "abort"]).optional(),
 });
 
 // ============================================================================
@@ -219,6 +279,11 @@ export const SwarmCheckpointedEventSchema = BaseEventSchema.extend({
     last_message: z.string().optional(),
     error_context: z.string().optional(),
   }),
+  // Enhanced observability fields
+  checkpoint_size_bytes: z.number().int().min(0).optional(),
+  trigger: z.enum(["manual", "auto", "progress", "error"]).optional(),
+  context_tokens_before: z.number().int().min(0).optional(),
+  context_tokens_after: z.number().int().min(0).optional(),
 });
 
 export const SwarmRecoveredEventSchema = BaseEventSchema.extend({
@@ -226,6 +291,96 @@ export const SwarmRecoveredEventSchema = BaseEventSchema.extend({
   epic_id: z.string(),
   bead_id: z.string(),
   recovered_from_checkpoint: z.number(), // timestamp
+  // Enhanced observability fields
+  recovery_duration_ms: z.number().int().min(0).optional(),
+  checkpoint_age_ms: z.number().int().min(0).optional(),
+  files_restored: z.array(z.string()).optional(),
+  context_restored_tokens: z.number().int().min(0).optional(),
+});
+
+export const CheckpointCreatedEventSchema = BaseEventSchema.extend({
+  type: z.literal("checkpoint_created"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  agent_name: z.string(),
+  checkpoint_id: z.string(),
+  trigger: z.enum(["manual", "auto", "progress", "error"]),
+  progress_percent: z.number().min(0).max(100),
+  files_snapshot: z.array(z.string()),
+});
+
+export const ContextCompactedEventSchema = BaseEventSchema.extend({
+  type: z.literal("context_compacted"),
+  epic_id: z.string().optional(),
+  bead_id: z.string().optional(),
+  agent_name: z.string(),
+  tokens_before: z.number().int().min(0),
+  tokens_after: z.number().int().min(0),
+  compression_ratio: z.number().min(0).max(1),
+  summary_length: z.number().int().min(0),
+});
+
+// ============================================================================
+// Swarm Lifecycle Events
+// ============================================================================
+
+export const SwarmStartedEventSchema = BaseEventSchema.extend({
+  type: z.literal("swarm_started"),
+  epic_id: z.string(),
+  epic_title: z.string(),
+  strategy: z.enum(["file-based", "feature-based", "risk-based"]),
+  subtask_count: z.number().int().min(0),
+  total_files: z.number().int().min(0),
+  coordinator_agent: z.string(),
+});
+
+export const WorkerSpawnedEventSchema = BaseEventSchema.extend({
+  type: z.literal("worker_spawned"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  worker_agent: z.string(),
+  subtask_title: z.string(),
+  files_assigned: z.array(z.string()),
+  spawn_order: z.number().int().min(0),
+  is_parallel: z.boolean(),
+});
+
+export const WorkerCompletedEventSchema = BaseEventSchema.extend({
+  type: z.literal("worker_completed"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  worker_agent: z.string(),
+  success: z.boolean(),
+  duration_ms: z.number().int().min(0),
+  files_touched: z.array(z.string()),
+  error_message: z.string().optional(),
+});
+
+export const ReviewStartedEventSchema = BaseEventSchema.extend({
+  type: z.literal("review_started"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  attempt: z.number().int().min(1),
+});
+
+export const ReviewCompletedEventSchema = BaseEventSchema.extend({
+  type: z.literal("review_completed"),
+  epic_id: z.string(),
+  bead_id: z.string(),
+  status: z.enum(["approved", "needs_changes", "blocked"]),
+  attempt: z.number().int().min(1),
+  duration_ms: z.number().int().min(0).optional(),
+});
+
+export const SwarmCompletedEventSchema = BaseEventSchema.extend({
+  type: z.literal("swarm_completed"),
+  epic_id: z.string(),
+  epic_title: z.string(),
+  success: z.boolean(),
+  total_duration_ms: z.number().int().min(0),
+  subtasks_completed: z.number().int().min(0),
+  subtasks_failed: z.number().int().min(0),
+  total_files_touched: z.array(z.string()),
 });
 
 // ============================================================================
@@ -238,8 +393,11 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   MessageSentEventSchema,
   MessageReadEventSchema,
   MessageAckedEventSchema,
+  ThreadCreatedEventSchema,
+  ThreadActivityEventSchema,
   FileReservedEventSchema,
   FileReleasedEventSchema,
+  FileConflictEventSchema,
   TaskStartedEventSchema,
   TaskProgressEventSchema,
   TaskCompletedEventSchema,
@@ -249,6 +407,14 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   HumanFeedbackEventSchema,
   SwarmCheckpointedEventSchema,
   SwarmRecoveredEventSchema,
+  CheckpointCreatedEventSchema,
+  ContextCompactedEventSchema,
+  SwarmStartedEventSchema,
+  WorkerSpawnedEventSchema,
+  WorkerCompletedEventSchema,
+  ReviewStartedEventSchema,
+  ReviewCompletedEventSchema,
+  SwarmCompletedEventSchema,
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
@@ -259,8 +425,11 @@ export type AgentActiveEvent = z.infer<typeof AgentActiveEventSchema>;
 export type MessageSentEvent = z.infer<typeof MessageSentEventSchema>;
 export type MessageReadEvent = z.infer<typeof MessageReadEventSchema>;
 export type MessageAckedEvent = z.infer<typeof MessageAckedEventSchema>;
+export type ThreadCreatedEvent = z.infer<typeof ThreadCreatedEventSchema>;
+export type ThreadActivityEvent = z.infer<typeof ThreadActivityEventSchema>;
 export type FileReservedEvent = z.infer<typeof FileReservedEventSchema>;
 export type FileReleasedEvent = z.infer<typeof FileReleasedEventSchema>;
+export type FileConflictEvent = z.infer<typeof FileConflictEventSchema>;
 export type TaskStartedEvent = z.infer<typeof TaskStartedEventSchema>;
 export type TaskProgressEvent = z.infer<typeof TaskProgressEventSchema>;
 export type TaskCompletedEvent = z.infer<typeof TaskCompletedEventSchema>;
@@ -274,6 +443,14 @@ export type SwarmCheckpointedEvent = z.infer<
   typeof SwarmCheckpointedEventSchema
 >;
 export type SwarmRecoveredEvent = z.infer<typeof SwarmRecoveredEventSchema>;
+export type CheckpointCreatedEvent = z.infer<typeof CheckpointCreatedEventSchema>;
+export type ContextCompactedEvent = z.infer<typeof ContextCompactedEventSchema>;
+export type SwarmStartedEvent = z.infer<typeof SwarmStartedEventSchema>;
+export type WorkerSpawnedEvent = z.infer<typeof WorkerSpawnedEventSchema>;
+export type WorkerCompletedEvent = z.infer<typeof WorkerCompletedEventSchema>;
+export type ReviewStartedEvent = z.infer<typeof ReviewStartedEventSchema>;
+export type ReviewCompletedEvent = z.infer<typeof ReviewCompletedEventSchema>;
+export type SwarmCompletedEvent = z.infer<typeof SwarmCompletedEventSchema>;
 
 // ============================================================================
 // Session State Types
