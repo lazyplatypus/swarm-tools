@@ -71,84 +71,73 @@ Shows how agent actions flow from tool calls → libSQL events → CLI queries/d
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                         EVENT FLOW: Agent → libSQL → CLI                 │
+│                    EVENT FLOW: Agent → libSQL → CLI                      │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  ┌─────────────────────┐                                                 │
-│  │   AGENT (Worker)    │                                                 │
-│  │  ┌───────────────┐  │  Tool Calls (via OpenCode MCP):                │
-│  │  │ swarmmail_*   │  │  ├─ swarmmail_init()                           │
-│  │  │ hive_*        │  │  ├─ swarmmail_reserve(["src/auth.ts"])         │
-│  │  │ swarm_*       │  │  ├─ swarm_progress(progress=50)                │
-│  │  └───────┬───────┘  │  └─ swarm_complete(...)                        │
-│  └──────────┼──────────┘                                                 │
-│             │                                                            │
-│             ▼                                                            │
-│  ┌──────────────────────────────────────────────────────────────┐        │
-│  │              SWARM-MAIL ADAPTER LAYER                        │        │
-│  │  (packages/swarm-mail/src/adapter.ts)                        │        │
-│  │                                                              │        │
-│  │  ┌────────────────────────────────────────────────────────┐  │        │
-│  │  │ appendEvent(event: SwarmMailEvent)                     │  │        │
-│  │  │  ├─ Validate with Zod schemas                          │  │        │
-│  │  │  ├─ Serialize to JSON (data field)                     │  │        │
-│  │  │  └─ INSERT into events table                           │  │        │
-│  │  └────────────────────────────────────────────────────────┘  │        │
-│  │                                                              │        │
-│  │  ┌────────────────────────────────────────────────────────┐  │        │
-│  │  │ Query Helpers (read from projections)                  │  │        │
-│  │  │  ├─ getInbox() → messages table                        │  │        │
-│  │  │  ├─ getReservations() → reservations table             │  │        │
-│  │  │  └─ getSwarmContext() → swarm_contexts table           │  │        │
-│  │  └────────────────────────────────────────────────────────┘  │        │
-│  └──────────────────────┬───────────────────────────────────────┘        │
-│                         │                                                │
-│                         ▼                                                │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                   libSQL DATABASE                                │    │
-│  │  (SQLite embedded, no server needed)                             │    │
-│  │  ~/.config/swarm-tools/libsql/<project-hash>/swarm.db            │    │
-│  │                                                                  │    │
-│  │  ┌────────────────────────────────────────────────────────────┐  │    │
-│  │  │ events (append-only log)                                   │  │    │
-│  │  │ ┌──────┬──────┬──────────┬──────────┬──────────┬─────────┐ │  │    │
-│  │  │ │  id  │ type │timestamp │project_key│ sequence │  data   │ │  │    │
-│  │  │ ├──────┼──────┼──────────┼──────────┼──────────┼─────────┤ │  │    │
-│  │  │ │  1   │ agent│170300123 │/proj/path│    1     │ {...}   │ │  │    │
-│  │  │ │  2   │ file │170300124 │/proj/path│    2     │ {...}   │ │  │    │
-│  │  │ │  3   │ task │170300199 │/proj/path│    3     │ {...}   │ │  │    │
-│  │  │ └──────┴──────┴──────────┴──────────┴──────────┴─────────┘ │  │    │
-│  │  └────────────────────────────────────────────────────────────┘  │    │
-│  │                                                                  │    │
-│  │  ┌────────────────────────────────────────────────────────────┐  │    │
-│  │  │ PROJECTIONS (materialized views, updated via triggers)     │  │    │
-│  │  │                                                            │  │    │
-│  │  │ agents          ← agent_registered, agent_active          │  │    │
-│  │  │ messages        ← message_sent                            │  │    │
-│  │  │ reservations    ← file_reserved, file_released            │  │    │
-│  │  │ swarm_contexts  ← swarm_checkpointed                      │  │    │
-│  │  │ eval_records    ← eval_captured, eval_scored              │  │    │
-│  │  └────────────────────────────────────────────────────────────┘  │    │
-│  └──────────────────────┬───────────────────────────────────────────┘    │
-│                         │                                                │
-│          ┌──────────────┼──────────────┬──────────────┬──────────────┐   │
-│          ▼              ▼              ▼              ▼              ▼   │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│   │  swarm   │  │  swarm   │  │  swarm   │  │  swarm   │  │  swarm   │  │
-│   │  query   │  │  stats   │  │ dashboard│  │  replay  │  │  export  │  │
-│   │  (SQL)   │  │ (counts) │  │   (TUI)  │  │ (replay) │  │ (JSONL)  │  │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-│       │              │              │              │              │      │
-│       ▼              ▼              ▼              ▼              ▼      │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                   CLI OUTPUT                                     │    │
-│  │                                                                  │    │
-│  │  📊 Analytics       📈 Dashboards      🔍 Debugging              │    │
-│  │  ├─ Event counts    ├─ Live progress  ├─ Event replay           │    │
-│  │  ├─ Duration P95    ├─ Agent status   ├─ Agent timeline         │    │
-│  │  ├─ Failure rate    ├─ File locks     ├─ Conflict detection     │    │
-│  │  └─ Conflict rate   └─ Auto-refresh   └─ Checkpoint history     │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
+│  ╔═══════════════════╗                                                   │
+│  ║ AGENT (Worker)    ║  Tool Calls via OpenCode MCP:                    │
+│  ╚═══════════════════╝  ┌────────────────────────────────────┐          │
+│           │             │ swarmmail_init()                   │          │
+│           │             │ swarmmail_reserve(["src/auth.ts"]) │          │
+│           │             │ swarm_progress(progress=50)        │          │
+│           │             │ swarm_complete(...)                │          │
+│           │             └────────────────────────────────────┘          │
+│           ▼                                                              │
+│  ╔═══════════════════════════════════════════════════════════════╗       │
+│  ║ ADAPTER LAYER (swarm-mail)                                   ║       │
+│  ║ packages/swarm-mail/src/adapter.ts                           ║       │
+│  ╠═══════════════════════════════════════════════════════════════╣       │
+│  ║ appendEvent(event: SwarmMailEvent)                           ║       │
+│  ║  1. Validate with Zod schemas (30+ event types)              ║       │
+│  ║  2. Serialize event.data to JSON                             ║       │
+│  ║  3. INSERT into events table                                 ║       │
+│  ║                                                              ║       │
+│  ║ Query Helpers (read from projections):                       ║       │
+│  ║  ├─ getInbox() → messages table                             ║       │
+│  ║  ├─ getReservations() → reservations table                  ║       │
+│  ║  └─ getSwarmContext() → swarm_contexts table                ║       │
+│  ╚═══════════════════════════════════════════════════════════════╝       │
+│           │                                                              │
+│           ▼                                                              │
+│  ╔═══════════════════════════════════════════════════════════════╗       │
+│  ║ libSQL DATABASE (SQLite embedded, no server)                ║       │
+│  ║ ~/.config/swarm-tools/libsql/<project-hash>/swarm.db         ║       │
+│  ╠═══════════════════════════════════════════════════════════════╣       │
+│  ║ events (append-only log)                                     ║       │
+│  ║ ┌──────┬──────────┬───────────┬──────────┬──────────┐        ║       │
+│  ║ │  id  │   type   │ timestamp │project_key│  data   │        ║       │
+│  ║ ├──────┼──────────┼───────────┼──────────┼──────────┤        ║       │
+│  ║ │  1   │agent_reg │1703001234 │/proj/path│{"..."}  │        ║       │
+│  ║ │  2   │file_res  │1703001240 │/proj/path│{"..."}  │        ║       │
+│  ║ │  3   │task_start│1703001299 │/proj/path│{"..."}  │        ║       │
+│  ║ └──────┴──────────┴───────────┴──────────┴──────────┘        ║       │
+│  ║                                                              ║       │
+│  ║ PROJECTIONS (auto-updated via triggers):                     ║       │
+│  ║ ├─ agents          ← agent_registered, agent_active         ║       │
+│  ║ ├─ messages        ← message_sent                           ║       │
+│  ║ ├─ reservations    ← file_reserved, file_released           ║       │
+│  ║ ├─ swarm_contexts  ← swarm_checkpointed                     ║       │
+│  ║ └─ eval_records    ← eval_captured, eval_scored             ║       │
+│  ╚═══════════════════════════════════════════════════════════════╝       │
+│           │                                                              │
+│    ┌──────┼─────┬──────────┬──────────┬──────────┐                      │
+│    ▼      ▼     ▼          ▼          ▼          ▼                      │
+│  ┌────┐┌────┐┌─────────┐┌────────┐┌────────┐┌────────┐                 │
+│  │query││stats││dashboard││replay  ││export  ││log     │                 │
+│  │(SQL)││(cnt)││  (TUI)  ││(time)  ││(JSONL) ││(tail)  │                 │
+│  └────┘└────┘└─────────┘└────────┘└────────┘└────────┘                 │
+│    │     │       │          │         │         │                       │
+│    └─────┴───────┴──────────┴─────────┴─────────┘                       │
+│                        ▼                                                 │
+│  ╔═══════════════════════════════════════════════════════════════╗       │
+│  ║ CLI OUTPUT                                                    ║       │
+│  ╠═══════════════════════════════════════════════════════════════╣       │
+│  ║ 📊 Analytics      📈 Dashboards     🔍 Debugging              ║       │
+│  ║ ├─ Event counts   ├─ Live progress  ├─ Event replay          ║       │
+│  ║ ├─ Duration P95   ├─ Agent status   ├─ Agent timeline        ║       │
+│  ║ ├─ Failure rate   ├─ File locks     ├─ Conflict detection    ║       │
+│  ║ └─ Conflict rate  └─ Auto-refresh   └─ Checkpoint history    ║       │
+│  ╚═══════════════════════════════════════════════════════════════╝       │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -156,10 +145,10 @@ Shows how agent actions flow from tool calls → libSQL events → CLI queries/d
 **Flow Summary:**
 
 1. **Agent Tool Call** → Agent calls `swarmmail_init()`, `swarm_progress()`, etc.
-2. **Adapter Layer** → Validates with Zod, serializes to JSON, appends to `events` table
-3. **libSQL Storage** → Events stored in append-only log, projections auto-updated
+2. **Adapter Layer** → Validates with Zod (30+ event types), serializes to JSON, appends to `events` table
+3. **libSQL Storage** → Events stored in append-only log, projections auto-updated via triggers
 4. **CLI Tools** → Query events/projections for analytics, monitoring, debugging
-5. **Observability** → Full audit trail, replay, real-time dashboards
+5. **Observability** → Full audit trail, replay capabilities, real-time dashboards
 
 ## Install
 
@@ -347,26 +336,40 @@ CREATE INDEX idx_events_project_type ON events(project_key, type);
 
 ### Event Types
 
-**Agent Lifecycle:**
+All events extend `BaseEventSchema` with common fields:
+```typescript
+{
+  id?: number;              // Auto-generated
+  type: string;             // Event discriminator
+  project_key: string;      // Project path
+  timestamp: number;        // Unix ms
+  sequence?: number;        // Auto-generated ordering
+}
+```
+
+**Agent Lifecycle (2 types):**
 ```typescript
 { type: "agent_registered"; agent_name: string; program?: string; model?: string; task_description?: string }
 { type: "agent_active"; agent_name: string }
 ```
 
-**Messages:**
+**Messages (5 types):**
 ```typescript
-{ type: "message_sent"; message_id: number; from_agent: string; to_agents: string[]; subject: string; body: string; thread_id?: string; importance?: "low" | "normal" | "high" | "urgent" }
+{ type: "message_sent"; message_id?: number; from_agent: string; to_agents: string[]; subject: string; body: string; thread_id?: string; importance?: "low" | "normal" | "high" | "urgent"; ack_required?: boolean; epic_id?: string; bead_id?: string; message_type?: "progress" | "blocked" | "question" | "status" | "general"; body_length?: number; recipient_count?: number; is_broadcast?: boolean }
 { type: "message_read"; message_id: number; agent_name: string }
 { type: "message_acked"; message_id: number; agent_name: string }
+{ type: "thread_created"; thread_id: string; epic_id?: string; initial_subject: string; creator_agent: string }
+{ type: "thread_activity"; thread_id: string; message_count: number; participant_count: number; last_message_agent: string; has_unread: boolean }
 ```
 
-**File Reservations:**
+**File Reservations (3 types):**
 ```typescript
-{ type: "file_reserved"; reservation_id: number; agent_name: string; paths: string[]; reason?: string; exclusive: boolean; ttl_seconds: number; expires_at: number }
-{ type: "file_released"; agent_name: string; paths?: string[]; reservation_ids?: number[] }
+{ type: "file_reserved"; reservation_id?: number; agent_name: string; paths: string[]; reason?: string; exclusive?: boolean; ttl_seconds?: number; expires_at: number; lock_holder_ids?: string[]; epic_id?: string; bead_id?: string; file_count?: number; is_retry?: boolean; conflict_agent?: string }
+{ type: "file_released"; agent_name: string; paths?: string[]; reservation_ids?: number[]; lock_holder_ids?: string[]; epic_id?: string; bead_id?: string; file_count?: number; hold_duration_ms?: number; files_modified?: number }
+{ type: "file_conflict"; requesting_agent: string; holding_agent: string; paths: string[]; epic_id?: string; bead_id?: string; resolution?: "wait" | "force" | "abort" }
 ```
 
-**Task Tracking:**
+**Task Tracking (4 types):**
 ```typescript
 { type: "task_started"; agent_name: string; bead_id: string; epic_id?: string }
 { type: "task_progress"; agent_name: string; bead_id: string; progress_percent?: number; message?: string; files_touched?: string[] }
@@ -374,24 +377,35 @@ CREATE INDEX idx_events_project_type ON events(project_key, type);
 { type: "task_blocked"; agent_name: string; bead_id: string; reason: string }
 ```
 
-**Swarm Coordination:**
+**Swarm Coordination (8 types):**
 ```typescript
-{ type: "swarm_checkpointed"; epic_id: string; progress: number; state: object }
-{ type: "decomposition_generated"; epic_id: string; subtasks: object[]; strategy: string }
-{ type: "subtask_outcome"; bead_id: string; success: boolean; duration_ms: number; error_count?: number; retry_count?: number }
+{ type: "swarm_started"; epic_id: string; epic_title: string; strategy: "file-based" | "feature-based" | "risk-based"; subtask_count: number; total_files: number; coordinator_agent: string }
+{ type: "worker_spawned"; epic_id: string; bead_id: string; worker_agent: string; subtask_title: string; files_assigned: string[]; spawn_order: number; is_parallel: boolean }
+{ type: "worker_completed"; epic_id: string; bead_id: string; worker_agent: string; success: boolean; duration_ms: number; files_touched: string[]; error_message?: string }
+{ type: "review_started"; epic_id: string; bead_id: string; attempt: number }
+{ type: "review_completed"; epic_id: string; bead_id: string; status: "approved" | "needs_changes" | "blocked"; attempt: number; duration_ms?: number }
+{ type: "swarm_completed"; epic_id: string; epic_title: string; success: boolean; total_duration_ms: number; subtasks_completed: number; subtasks_failed: number; total_files_touched: string[] }
+{ type: "decomposition_generated"; epic_id: string; task: string; context?: string; strategy: "file-based" | "feature-based" | "risk-based"; epic_title: string; subtasks: Array<{ title: string; files: string[]; priority?: number }>; recovery_context?: object }
+{ type: "subtask_outcome"; epic_id: string; bead_id: string; planned_files: string[]; actual_files: string[]; duration_ms: number; error_count?: number; retry_count?: number; success: boolean; scope_violation?: boolean; violation_files?: string[] }
 ```
 
-**Eval & Learning:**
+**Checkpoints & Recovery (4 types):**
 ```typescript
-{ type: "eval_captured"; eval_id: string; epic_id: string; prompt: string; response: string; criteria: object[] }
-{ type: "eval_scored"; eval_id: string; scores: object[] }
-{ type: "eval_finalized"; eval_id: string; final_score: number; passing: boolean }
+{ type: "swarm_checkpointed"; epic_id: string; bead_id: string; strategy: "file-based" | "feature-based" | "risk-based"; files: string[]; dependencies: string[]; directives: object; recovery: object; checkpoint_size_bytes?: number; trigger?: "manual" | "auto" | "progress" | "error"; context_tokens_before?: number; context_tokens_after?: number }
+{ type: "swarm_recovered"; epic_id: string; bead_id: string; recovered_from_checkpoint: number; recovery_duration_ms?: number; checkpoint_age_ms?: number; files_restored?: string[]; context_restored_tokens?: number }
+{ type: "checkpoint_created"; epic_id: string; bead_id: string; agent_name: string; checkpoint_id: string; trigger: "manual" | "auto" | "progress" | "error"; progress_percent: number; files_snapshot: string[] }
+{ type: "context_compacted"; epic_id?: string; bead_id?: string; agent_name: string; tokens_before: number; tokens_after: number; compression_ratio: number; summary_length: number }
 ```
 
-**Session Capture:**
+**Validation & Learning (4 types):**
 ```typescript
-{ type: "session_event"; session_id: string; event_type: "DECISION" | "VIOLATION" | "OUTCOME" | "COMPACTION"; event_data: object }
+{ type: "validation_started"; epic_id: string; swarm_id: string; started_at: number }
+{ type: "validation_issue"; epic_id: string; severity: "error" | "warning" | "info"; category: "schema_mismatch" | "missing_event" | "undefined_value" | "dashboard_render" | "websocket_delivery"; message: string; location?: object }
+{ type: "validation_completed"; epic_id: string; swarm_id: string; passed: boolean; issue_count: number; duration_ms: number }
+{ type: "human_feedback"; epic_id: string; accepted: boolean; modified?: boolean; notes?: string }
 ```
+
+**Total: 30+ event types** - Full Zod schemas in [src/streams/events.ts](src/streams/events.ts)
 
 ## libSQL Query Examples
 
@@ -657,7 +671,7 @@ ORDER BY reservation_attempts DESC;
 ### Debugging Queries
 
 ```sql
--- Agent activity timeline
+-- Agent activity timeline (comprehensive view)
 SELECT 
   datetime(timestamp/1000, 'unixepoch') as time,
   type,
@@ -665,7 +679,11 @@ SELECT
     WHEN type = 'agent_registered' THEN 'Registered: ' || json_extract(data, '$.task_description')
     WHEN type = 'message_sent' THEN 'Sent: ' || json_extract(data, '$.subject')
     WHEN type = 'file_reserved' THEN 'Locked: ' || json_extract(data, '$.paths')
-    WHEN type = 'task_completed' THEN 'Completed: ' || json_extract(data, '$.bead_id')
+    WHEN type = 'file_released' THEN 'Released: ' || json_extract(data, '$.file_count') || ' files'
+    WHEN type = 'task_started' THEN 'Started: ' || json_extract(data, '$.bead_id')
+    WHEN type = 'task_progress' THEN 'Progress: ' || json_extract(data, '$.progress_percent') || '%'
+    WHEN type = 'task_completed' THEN 'Completed: ' || json_extract(data, '$.bead_id') || ' (' || CASE WHEN json_extract(data, '$.success') = 1 THEN 'success' ELSE 'failed' END || ')'
+    WHEN type = 'task_blocked' THEN 'Blocked: ' || json_extract(data, '$.reason')
     ELSE type
   END as activity
 FROM events
@@ -674,35 +692,153 @@ ORDER BY timestamp DESC
 LIMIT 50;
 
 -- Find stuck tasks (started but not completed)
+WITH task_events AS (
+  SELECT 
+    json_extract(data, '$.bead_id') as task_id,
+    json_extract(data, '$.agent_name') as agent,
+    MIN(CASE WHEN type = 'task_started' THEN timestamp END) as started_at,
+    MAX(CASE WHEN type IN ('task_completed', 'task_blocked') THEN timestamp END) as ended_at
+  FROM events
+  WHERE type IN ('task_started', 'task_completed', 'task_blocked')
+  GROUP BY task_id, agent
+)
 SELECT 
-  started.timestamp as started_at,
-  json_extract(started.data, '$.bead_id') as task,
-  json_extract(started.data, '$.agent_name') as agent,
-  (strftime('%s', 'now') * 1000 - started.timestamp) / 60000.0 as minutes_ago
-FROM events started
-WHERE started.type = 'task_started'
-  AND NOT EXISTS (
-    SELECT 1 FROM events completed
-    WHERE completed.type IN ('task_completed', 'task_blocked')
-      AND json_extract(completed.data, '$.bead_id') = json_extract(started.data, '$.bead_id')
-  )
-ORDER BY started.timestamp DESC;
+  task_id,
+  agent,
+  datetime(started_at/1000, 'unixepoch') as started,
+  ROUND((strftime('%s', 'now') * 1000 - started_at) / 60000.0, 1) as minutes_stuck
+FROM task_events
+WHERE ended_at IS NULL
+ORDER BY started_at DESC;
 
--- Message response times
+-- Message response times (high/urgent only)
+WITH message_timings AS (
+  SELECT 
+    json_extract(sent.data, '$.message_id') as msg_id,
+    json_extract(sent.data, '$.subject') as subject,
+    json_extract(sent.data, '$.from_agent') as sender,
+    json_extract(sent.data, '$.importance') as importance,
+    sent.timestamp as sent_at,
+    read.timestamp as read_at
+  FROM events sent
+  LEFT JOIN events read 
+    ON read.type = 'message_read' 
+    AND json_extract(read.data, '$.message_id') = json_extract(sent.data, '$.message_id')
+  WHERE sent.type = 'message_sent'
+    AND json_extract(sent.data, '$.importance') IN ('high', 'urgent')
+)
 SELECT 
-  sent.id,
-  sent.subject,
-  sent.from_agent,
-  read.agent_name as reader,
-  (read_evt.timestamp - sent.sent_at) / 1000.0 as response_time_seconds
-FROM messages sent
-JOIN message_reads read ON read.message_id = sent.id
-JOIN events read_evt ON read_evt.type = 'message_read' 
-  AND json_extract(read_evt.data, '$.message_id') = sent.id
-WHERE sent.importance IN ('high', 'urgent')
-ORDER BY response_time_seconds DESC
-LIMIT 10;
+  msg_id,
+  subject,
+  sender,
+  importance,
+  datetime(sent_at/1000, 'unixepoch') as sent,
+  CASE 
+    WHEN read_at IS NULL THEN 'UNREAD'
+    ELSE ROUND((read_at - sent_at) / 1000.0, 1) || 's'
+  END as response_time
+FROM message_timings
+ORDER BY sent_at DESC
+LIMIT 20;
+
+-- Swarm execution summary (epic overview)
+WITH epic_events AS (
+  SELECT 
+    json_extract(data, '$.epic_id') as epic_id,
+    type,
+    timestamp,
+    data
+  FROM events
+  WHERE json_extract(data, '$.epic_id') = 'mjmas3zxlmg'
+)
+SELECT 
+  'Epic' as metric,
+  json_extract((SELECT data FROM epic_events WHERE type = 'swarm_started' LIMIT 1), '$.epic_title') as value
+UNION ALL
+SELECT 
+  'Strategy',
+  json_extract((SELECT data FROM epic_events WHERE type = 'swarm_started' LIMIT 1), '$.strategy')
+UNION ALL
+SELECT 
+  'Workers Spawned',
+  CAST(COUNT(*) AS TEXT)
+FROM epic_events WHERE type = 'worker_spawned'
+UNION ALL
+SELECT 
+  'Tasks Completed',
+  CAST(COUNT(*) AS TEXT)
+FROM epic_events WHERE type = 'worker_completed' AND json_extract(data, '$.success') = 1
+UNION ALL
+SELECT 
+  'Tasks Failed',
+  CAST(COUNT(*) AS TEXT)
+FROM epic_events WHERE type = 'worker_completed' AND json_extract(data, '$.success') = 0
+UNION ALL
+SELECT 
+  'File Conflicts',
+  CAST(COUNT(*) AS TEXT)
+FROM epic_events WHERE type = 'file_conflict'
+UNION ALL
+SELECT 
+  'Checkpoints',
+  CAST(COUNT(*) AS TEXT)
+FROM epic_events WHERE type = 'checkpoint_created';
+
+-- Worker performance comparison
+SELECT 
+  json_extract(data, '$.worker_agent') as worker,
+  COUNT(*) as tasks_completed,
+  SUM(CASE WHEN json_extract(data, '$.success') = 1 THEN 1 ELSE 0 END) as successful,
+  ROUND(AVG(json_extract(data, '$.duration_ms')) / 1000.0, 1) as avg_duration_sec,
+  ROUND(AVG(CAST(json_length(json_extract(data, '$.files_touched')) AS REAL)), 1) as avg_files_touched
+FROM events
+WHERE type = 'worker_completed'
+  AND json_extract(data, '$.epic_id') = 'mjmas3zxlmg'
+GROUP BY worker
+ORDER BY successful DESC, avg_duration_sec ASC;
+
+## Dashboard Data Layer (Programmatic Access)
+
+For building custom dashboards or monitoring tools, use the dashboard data layer from `opencode-swarm-plugin`:
+
+```typescript
+import { 
+  getWorkerStatus, 
+  getSubtaskProgress, 
+  getFileLocks, 
+  getRecentMessages,
+  getEpicList 
+} from "opencode-swarm-plugin";
+import { getSwarmMailLibSQL } from "swarm-mail";
+
+const db = await getSwarmMailLibSQL("/my/project");
+
+// Get worker statuses (idle/working/blocked)
+const workers = await getWorkerStatus(db, { project_key: "/my/project" });
+// Returns: [{ agent_name: "Worker1", status: "working", current_task: "bd-123", last_activity: "2025-12-26T..." }]
+
+// Get subtask progress for an epic
+const progress = await getSubtaskProgress(db, "mjmas3zxlmg");
+// Returns: [{ bead_id: "bd-123", title: "Add auth", status: "in_progress", progress_percent: 50 }]
+
+// Get active file locks
+const locks = await getFileLocks(db);
+// Returns: [{ path: "src/auth.ts", agent_name: "Worker1", reason: "bd-123: Auth", acquired_at: "...", ttl_seconds: 3600 }]
+
+// Get recent messages
+const messages = await getRecentMessages(db, { limit: 10, importance: "high" });
+// Returns: [{ id: 1, from: "Worker1", to: ["Coordinator"], subject: "BLOCKED", timestamp: "...", importance: "high" }]
+
+// List all epics
+const epics = await getEpicList(db);
+// Returns: [{ epic_id: "mjmas3zxlmg", title: "Feature X", subtask_count: 5, completed_count: 3 }]
 ```
+
+**Use cases:**
+- Build custom TUI dashboards (see `swarm dashboard` implementation)
+- Export to monitoring systems (Prometheus, Datadog)
+- Real-time web dashboards (WebSocket + React)
+- Alerting (detect stuck tasks, file conflicts)
 
 ## Projections
 

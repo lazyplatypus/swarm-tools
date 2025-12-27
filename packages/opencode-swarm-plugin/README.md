@@ -446,77 +446,210 @@ swarm migrate   # Migrate from legacy PGLite to libSQL
 swarm version   # Show version info
 ```
 
-### Logging & Observability
+### Observability Commands
 
-Structured Pino logging with daily rotation:
+**swarm query** - SQL analytics with presets
 
 ```bash
-# Enable pretty logging during development
-SWARM_LOG_PRETTY=1 opencode
+# Execute custom SQL query against event store
+swarm query --sql "SELECT * FROM events WHERE type='worker_spawned' LIMIT 10"
 
-# Query logs (aliases: log/logs)
-swarm log                      # Tail recent logs
-swarm logs compaction          # Filter by module
-swarm log --level warn         # Filter by level (warn+)
-swarm log --since 1h           # Last hour
-swarm log --json | jq          # Pipe to jq for analysis
+# Use preset query (10+ presets available)
+swarm query --preset failed_decompositions
+swarm query --preset duration_by_strategy
+swarm query --preset file_conflicts
+swarm query --preset worker_success_rate
+swarm query --preset review_rejections
+swarm query --preset blocked_tasks
+swarm query --preset agent_activity
+swarm query --preset event_frequency
+swarm query --preset error_patterns
+swarm query --preset compaction_stats
+
+# Output formats
+swarm query --preset failed_decompositions --format table  # Default
+swarm query --preset duration_by_strategy --format csv
+swarm query --preset file_conflicts --format json
 ```
 
-**Log files:** `~/.config/swarm-tools/logs/`
-- `swarm.1log`, `swarm.2log`, ... (main logs)
-- `compaction.1log`, ... (module-specific)
-- Daily rotation, 14-day retention
-
-### Analytics & Debugging
-
-Query event store for insights and debugging:
+**swarm dashboard** - Live terminal UI
 
 ```bash
-# Execute SQL query against event store
-swarm query --sql "SELECT type, COUNT(*) FROM events GROUP BY type"
+# Launch dashboard (auto-refresh every 1s)
+swarm dashboard
 
-# Use pre-built analytics queries
-swarm query --preset golden-signals      # Four Golden Signals (latency, traffic, errors, saturation)
-swarm query --preset compaction-health   # Compaction performance metrics
-swarm query --preset file-conflicts      # File reservation conflict analysis
+# Focus on specific epic
+swarm dashboard --epic mjmas3zxlmg
+
+# Custom refresh rate (milliseconds)
+swarm dashboard --refresh 2000
+```
+
+**Dashboard shows:**
+- Active workers and their current tasks
+- Progress bars for in-progress work
+- File reservations (who owns what)
+- Recent messages between agents
+- Error alerts
+
+**swarm replay** - Event replay with timing
+
+```bash
+# Replay epic at normal speed
+swarm replay mjmas3zxlmg
+
+# Fast playback
+swarm replay mjmas3zxlmg --speed 2x
+swarm replay mjmas3zxlmg --speed instant
+
+# Filter by event type
+swarm replay mjmas3zxlmg --type worker_spawned,task_completed
+
+# Filter by agent
+swarm replay mjmas3zxlmg --agent DarkHawk
+
+# Time range filters
+swarm replay mjmas3zxlmg --since "2025-12-25T10:00:00"
+swarm replay mjmas3zxlmg --until "2025-12-25T12:00:00"
+
+# Combine filters
+swarm replay mjmas3zxlmg --speed 2x --type worker_spawned --agent BlueLake
+```
+
+**swarm export** - Data export for analysis
+
+```bash
+# Export all events as JSON (stdout)
+swarm export
+
+# Export specific epic
+swarm export --epic mjmas3zxlmg
 
 # Export formats
-swarm query --sql "..." --format json    # JSON output
-swarm query --sql "..." --format csv     # CSV output
-swarm query --sql "..." --format table   # Pretty table (default)
+swarm export --format json --output events.json
+swarm export --format csv --output events.csv
+swarm export --format otlp --output events.otlp  # OpenTelemetry Protocol
 
-# Stats and history
-swarm stats                              # Event store statistics (counts by type, project)
-swarm history                            # Recent swarm activity summary
+# Pipe to jq for filtering
+swarm export --format json | jq '.[] | select(.type=="worker_spawned")'
 ```
 
-### Real-Time Monitoring
+**swarm stats** - Health metrics
 
 ```bash
-# Dashboard (TUI) - live swarm status
-swarm dashboard                          # Show all active swarms
-swarm dashboard --epic mjmas3zxlmg       # Filter by epic ID
-swarm dashboard --refresh 5              # Auto-refresh every 5 seconds
+# Last 7 days (default)
+swarm stats
 
-# Event replay - watch swarm execution
-swarm replay mjmas3zxlmg                 # Replay entire epic from events
-swarm replay mjmas3zxlmg --speed 2.0     # 2x speed
-swarm replay mjmas3zxlmg --type DECISION # Only DECISION events
-swarm replay mjmas3zxlmg --agent Worker1 # Single agent's perspective
-swarm replay mjmas3zxlmg --since "2h"    # Last 2 hours
-swarm replay mjmas3zxlmg --until "1h"    # Up to 1 hour ago
+# Custom time period
+swarm stats --since 24h
+swarm stats --since 30m
+
+# JSON output for scripting
+swarm stats --json
 ```
 
-### Data Export
+**swarm history** - Activity timeline
 
 ```bash
-# Export event data
-swarm export                             # Export all events as JSON
-swarm export --format csv                # CSV format
-swarm export --epic mjmas3zxlmg          # Filter by epic ID
-swarm export --output swarm-data.json    # Save to file
-swarm export --format jsonl              # JSONL (one event per line)
+# Last 10 swarms (default)
+swarm history
+
+# More results
+swarm history --limit 20
+
+# Filter by status
+swarm history --status success
+swarm history --status failed
+swarm history --status in_progress
+
+# Filter by strategy
+swarm history --strategy file-based
+swarm history --strategy feature-based
+
+# Verbose mode (show subtasks)
+swarm history --verbose
 ```
+
+**swarm log** - Query/tail logs
+
+```bash
+# Recent logs (last 50 lines)
+swarm log
+
+# Filter by module
+swarm log compaction
+
+# Filter by level
+swarm log --level error
+swarm log --level warn
+
+# Time filters
+swarm log --since 30s
+swarm log --since 5m
+swarm log --since 2h
+
+# JSON output
+swarm log --json
+
+# Limit output
+swarm log --limit 100
+
+# Watch mode (live tail)
+swarm log --watch
+swarm log --watch --interval 500  # Poll every 500ms
+```
+
+**swarm log sessions** - View coordinator sessions
+
+```bash
+# List all sessions
+swarm log sessions
+
+# View specific session
+swarm log sessions <session_id>
+
+# Most recent session
+swarm log sessions --latest
+
+# Filter by event type
+swarm log sessions --type DECISION
+swarm log sessions --type VIOLATION
+swarm log sessions --type OUTCOME
+swarm log sessions --type COMPACTION
+
+# JSON output for jq
+swarm log sessions --json
+```
+
+### Debug Logging
+
+Use `DEBUG` env var to enable swarm debug logs:
+
+```bash
+# All swarm logs
+DEBUG=swarm:* swarm dashboard
+
+# Coordinator only
+DEBUG=swarm:coordinator swarm replay <epic-id>
+
+# Workers only
+DEBUG=swarm:worker swarm export
+
+# Swarm mail only
+DEBUG=swarm:mail swarm query --preset agent_activity
+
+# Multiple namespaces (comma-separated)
+DEBUG=swarm:coordinator,swarm:worker swarm dashboard
+```
+
+**Namespaces:**
+
+| Namespace | What It Logs |
+|-----------|--------------|
+| `swarm:*` | All swarm activity |
+| `swarm:coordinator` | Coordinator decisions (spawn, review, approve/reject) |
+| `swarm:worker` | Worker progress, reservations, completions |
+| `swarm:mail` | Inter-agent messages, inbox/outbox activity |
 
 ## Observability Architecture
 
@@ -573,16 +706,65 @@ Swarm uses **event sourcing** for complete observability. Every coordination act
 
 ### Key Event Types
 
+**Agent Lifecycle:**
 | Event Type | When It Fires | Used For |
 |------------|---------------|----------|
 | `agent_registered` | Agent calls `swarmmail_init()` | Agent discovery, project tracking |
-| `message_sent` | Agent sends swarm mail | Agent coordination, thread tracking |
-| `file_reserved` | Agent reserves files for edit | Conflict detection, lock management |
-| `file_released` | Agent releases or completes | Lock cleanup, reservation tracking |
+| `agent_active` | Periodic heartbeat | Last-seen tracking |
+
+**Messages:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
+| `message_sent` | Agent sends swarm mail | Coordination, thread tracking |
+| `message_read` | Agent reads message | Read receipts |
+| `message_acked` | Agent acknowledges | Confirmation tracking |
+| `thread_created` | First message in thread | Thread lifecycle |
+| `thread_activity` | Thread stats update | Unread counts, participants |
+
+**File Reservations:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
+| `file_reserved` | Agent reserves files | Conflict detection, lock management |
+| `file_released` | Agent releases files | Lock cleanup, reservation tracking |
+| `file_conflict` | Reservation collision | Conflict resolution, deadlock detection |
+
+**Task Tracking:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
 | `task_started` | Agent starts cell work | Progress tracking, timeline |
 | `task_progress` | Agent reports milestone | Real-time monitoring, ETA |
 | `task_completed` | Agent calls `swarm_complete()` | Outcome tracking, learning signals |
+| `task_blocked` | Agent hits blocker | Dependency tracking, alerts |
+
+**Swarm Coordination:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
+| `swarm_started` | Coordinator begins epic | Swarm lifecycle tracking |
+| `worker_spawned` | Coordinator spawns worker | Worker tracking, spawn order |
+| `worker_completed` | Worker finishes subtask | Outcome tracking, duration |
+| `review_started` | Coordinator begins review | Review tracking, attempts |
+| `review_completed` | Review finishes | Approval/rejection tracking |
+| `swarm_completed` | All subtasks done | Epic completion, success rate |
+| `decomposition_generated` | Task decomposed | Strategy tracking, subtask planning |
+| `subtask_outcome` | Subtask finishes | Learning signals, scope violations |
+
+**Checkpoints & Recovery:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
 | `swarm_checkpointed` | Auto at 25/50/75% or manual | Recovery, context preservation |
+| `swarm_recovered` | Resume from checkpoint | Recovery tracking, checkpoint age |
+| `checkpoint_created` | Checkpoint saved | Checkpoint lifecycle |
+| `context_compacted` | Context compaction runs | Context compression tracking |
+
+**Validation & Learning:**
+| Event Type | When It Fires | Used For |
+|------------|---------------|----------|
+| `validation_started` | Validation begins | Validation lifecycle |
+| `validation_issue` | Validation finds issue | Issue tracking, debugging |
+| `validation_completed` | Validation finishes | Pass/fail tracking |
+| `human_feedback` | Human accepts/modifies | Human-in-loop learning |
+
+**Full Schema:** See [swarm-mail/src/streams/events.ts](../swarm-mail/src/streams/events.ts) for complete Zod schemas (30+ event types)
 
 ### Analytics Queries
 
@@ -667,13 +849,16 @@ swarm query --preset file-conflicts
 swarm query --sql "SELECT * FROM events WHERE json_extract(data, '$.bead_id') = 'mjmas411jtj' ORDER BY timestamp"
 
 # 2. Check for file reservation conflicts
-swarm query --preset file-conflicts
+swarm query --preset file_conflicts
 
 # 3. Replay to see execution timeline
 swarm replay mjmas3zxlmg --agent WorkerName
 
 # 4. Check if agent is still registered
 swarm stats
+
+# 5. Enable debug logging for live tracking
+DEBUG=swarm:worker swarm dashboard --epic mjmas3zxlmg
 ```
 
 **Scenario 2: High failure rate for a specific epic**
@@ -682,24 +867,62 @@ swarm stats
 # 1. Get stats by epic
 swarm query --sql "SELECT type, COUNT(*) FROM events WHERE json_extract(data, '$.epic_id') = 'mjmas3zxlmg' GROUP BY type"
 
-# 2. Find failures
+# 2. Find failures with reasons
 swarm query --sql "SELECT * FROM events WHERE type = 'task_completed' AND json_extract(data, '$.epic_id') = 'mjmas3zxlmg' AND json_extract(data, '$.success') = 0"
 
 # 3. Export for analysis
 swarm export --epic mjmas3zxlmg --format csv > failures.csv
+
+# 4. Check coordinator session for violations
+swarm log sessions --type VIOLATION --json
 ```
 
 **Scenario 3: Performance regression (tasks slower than before)**
 
 ```bash
 # 1. Check latency trends
-swarm query --preset golden-signals
+swarm query --preset duration_by_strategy
 
 # 2. Compare with historical baselines
-swarm history
+swarm history --limit 50
 
 # 3. Identify bottlenecks
 swarm dashboard --epic mjmas3zxlmg --refresh 2
+
+# 4. Analyze worker spawn efficiency
+swarm query --preset worker_success_rate
+```
+
+**Scenario 4: File reservation conflicts**
+
+```bash
+# 1. Check active locks
+swarm query --preset file_conflicts
+
+# 2. See who's holding what
+swarm dashboard  # Shows file locks section
+
+# 3. View full conflict history
+swarm query --sql "SELECT * FROM events WHERE type = 'file_conflict' ORDER BY timestamp DESC LIMIT 20"
+
+# 4. Replay to see conflict sequence
+swarm replay mjmas3zxlmg --type file_reserved,file_released,file_conflict
+```
+
+**Scenario 5: Coordinator not spawning workers**
+
+```bash
+# 1. Check coordinator session for violations
+swarm log sessions --latest --type DECISION,VIOLATION
+
+# 2. Verify decomposition was generated
+swarm query --sql "SELECT * FROM events WHERE type = 'decomposition_generated' ORDER BY timestamp DESC LIMIT 5"
+
+# 3. Debug coordinator logic
+DEBUG=swarm:coordinator swarm replay mjmas3zxlmg
+
+# 4. Check for blocked tasks
+swarm query --preset blocked_tasks
 ```
 
 ### Event Store Schema

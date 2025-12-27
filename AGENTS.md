@@ -1205,3 +1205,44 @@ cass_search({ query: "Next.js caching searchParams", limit: 5 })
 ```
 
 **Pro tip:** Query CASS at the START of complex tasks. Past solutions save time and prevent solving the same problem twice.
+
+---
+
+## OpenCode Commands
+
+Custom commands available via `/command`:
+
+| Command               | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `/swarm <task>`       | Decompose task into cells, spawn parallel agents with shared context |
+| `/parallel "t1" "t2"` | Run explicit task list in parallel                                   |
+| `/fix-all`            | Survey PRs + cells, dispatch agents to fix issues                    |
+| `/review-my-shit`     | Pre-PR self-review: lint, types, common mistakes                     |
+| `/handoff`            | End session: sync hive, generate continuation prompt                |
+| `/sweep`              | Codebase cleanup: type errors, lint, dead code                       |
+| `/focus <cell-id>`    | Start focused session on specific cell                               |
+| `/context-dump`       | Dump state for model switch or context recovery                      |
+| `/checkpoint`         | Compress context: summarize session, preserve decisions              |
+| `/retro <cell-id>`    | Post-mortem: extract learnings, update knowledge files               |
+| `/worktree-task <id>` | Create git worktree for isolated cell work                           |
+| `/commit`             | Smart commit with conventional format + cell refs                   |
+| `/pr-create`          | Create PR with cell linking + smart summary                         |
+| `/debug <error>`      | Investigate error, check known patterns first                        |
+| `/debug-plus`         | Enhanced debug with swarm integration and prevention pipeline        |
+| `/iterate <task>`     | Evaluator-optimizer loop: generate, critique, improve until good     |
+| `/triage <request>`   | Intelligent routing: classify and dispatch to right handler          |
+| `/repo-dive <repo>`   | Deep analysis of GitHub repo with autopsy tools                      |
+
+## OpenCode Agents
+
+Specialized subagents (invoke with `@agent-name` or auto-dispatched):
+
+| Agent           | Model             | Purpose                                               |
+| --------------- | ----------------- | ----------------------------------------------------- |
+| `swarm/planner` | claude-sonnet-4-5 | Strategic task decomposition for swarm coordination   |
+| `swarm/worker`  | claude-sonnet-4-5 | **PRIMARY for /swarm** - parallel task implementation |
+| `hive`          | claude-haiku      | Work item tracker operations (locked down)            |
+| `archaeologist` | claude-sonnet-4-5 | Read-only codebase exploration, architecture mapping  |
+| `explore`       | claude-haiku-4-5  | Fast codebase search, pattern discovery (read-only)   |
+| `refactorer`    | default           | Pattern migration across codebase                     |
+| `reviewer`      | default           | Read-only code review, security/perf audits           |
