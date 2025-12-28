@@ -23,6 +23,7 @@ import {
 	getSwarmMailLibSQL,
 } from "swarm-mail";
 import {
+	clearHiveAdapterCache,
 	getHiveAdapter,
 	hive_create,
 	setHiveWorkingDirectory,
@@ -67,6 +68,7 @@ describe("swarm_review integration", () => {
 		// Clean up
 		await swarmMail.close();
 		clearAdapterCache();
+		clearHiveAdapterCache();
 		rmSync(testProjectPath, { recursive: true, force: true });
 	});
 

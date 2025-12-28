@@ -15,8 +15,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SwarmMailAdapter } from "swarm-mail";
-import { createInMemorySwarmMailLibSQL } from "swarm-mail";
+import { getSwarmMailLibSQL } from "swarm-mail";
 import {
 	getWorkerStatus,
 	getSubtaskProgress,
@@ -27,10 +30,12 @@ import {
 
 describe("Dashboard Data Layer - RED Phase", () => {
 	let swarmMail: SwarmMailAdapter;
-	const testProjectPath = "/test/dashboard";
+	let testProjectPath: string;
 
 	beforeAll(async () => {
-		swarmMail = await createInMemorySwarmMailLibSQL(testProjectPath);
+		// Create real temp directory for libSQL
+		testProjectPath = mkdtempSync(join(tmpdir(), "dashboard-test-"));
+		swarmMail = await getSwarmMailLibSQL(testProjectPath);
 		const db = await swarmMail.getDatabase();
 
 		// Seed test data for dashboard queries
@@ -218,20 +223,20 @@ describe("Dashboard Data Layer - RED Phase", () => {
 
 	afterAll(async () => {
 		await swarmMail.close();
+		// Clean up temp directory
+		rmSync(testProjectPath, { recursive: true, force: true });
 	});
 
 	describe("getWorkerStatus()", () => {
 		test("should return array of WorkerStatus objects", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db);
+			const result = await getWorkerStatus(testProjectPath);
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBeGreaterThan(0);
 		});
 
 		test("should include agent_name, status, and last_activity", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db);
+			const result = await getWorkerStatus(testProjectPath);
 
 			const worker = result[0];
 			expect(worker).toHaveProperty("agent_name");
@@ -247,8 +252,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should include current_task when agent is working", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db);
+			const result = await getWorkerStatus(testProjectPath);
 
 			// Find a working agent
 			const workingAgent = result.find((w) => w.status === "working");
@@ -259,8 +263,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should derive status from latest events", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db);
+			const result = await getWorkerStatus(testProjectPath);
 
 			// AlphaAgent has task_started + progress_reported → working
 			const alpha = result.find((w) => w.agent_name === "AlphaAgent");
@@ -272,16 +275,14 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should filter by project_key when provided", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db, { project_key: testProjectPath });
+			const result = await getWorkerStatus(testProjectPath, { project_key: testProjectPath });
 
 			expect(result.length).toBeGreaterThan(0);
 			// All results should be from our test project
 		});
 
 		test("should return empty array when no agents found", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getWorkerStatus(db, { project_key: "/nonexistent" });
+			const result = await getWorkerStatus(testProjectPath + "-nonexistent", { project_key: "/nonexistent" });
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBe(0);
@@ -290,16 +291,14 @@ describe("Dashboard Data Layer - RED Phase", () => {
 
 	describe("getSubtaskProgress()", () => {
 		test("should return array of SubtaskProgress objects", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "epic-1");
+			const result = await getSubtaskProgress(testProjectPath, "epic-1");
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBeGreaterThan(0);
 		});
 
 		test("should include bead_id, title, status, and progress_percent", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "epic-1");
+			const result = await getSubtaskProgress(testProjectPath, "epic-1");
 
 			const subtask = result[0];
 			expect(subtask).toHaveProperty("bead_id");
@@ -318,8 +317,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return subtasks for specified epic only", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "epic-1");
+			const result = await getSubtaskProgress(testProjectPath, "epic-1");
 
 			// Should have epic-1.1, epic-1.2, epic-1.3
 			const beadIds = result.map((s) => s.bead_id);
@@ -332,8 +330,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should derive progress from progress_reported events", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "epic-1");
+			const result = await getSubtaskProgress(testProjectPath, "epic-1");
 
 			// epic-1.1 reported 50% progress
 			const task1 = result.find((s) => s.bead_id === "epic-1.1");
@@ -345,8 +342,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should default to 0% progress when no progress events exist", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "epic-1");
+			const result = await getSubtaskProgress(testProjectPath, "epic-1");
 
 			// epic-1.3 is blocked but has no progress events
 			const task3 = result.find((s) => s.bead_id === "epic-1.3");
@@ -354,8 +350,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return empty array when epic has no subtasks", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getSubtaskProgress(db, "nonexistent-epic");
+			const result = await getSubtaskProgress(testProjectPath, "nonexistent-epic");
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBe(0);
@@ -364,16 +359,14 @@ describe("Dashboard Data Layer - RED Phase", () => {
 
 	describe("getFileLocks()", () => {
 		test("should return array of FileLock objects", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getFileLocks(db);
+			const result = await getFileLocks(testProjectPath);
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBeGreaterThan(0);
 		});
 
 		test("should include path, agent_name, reason, acquired_at, and ttl_seconds", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getFileLocks(db);
+			const result = await getFileLocks(testProjectPath);
 
 			const lock = result[0];
 			expect(lock).toHaveProperty("path");
@@ -391,8 +384,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return current reservations from events", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getFileLocks(db);
+			const result = await getFileLocks(testProjectPath);
 
 			// Should have src/auth/** reserved by AlphaAgent
 			const authLock = result.find((l) => l.path === "src/auth/**");
@@ -408,8 +400,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should filter by project_key when provided", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getFileLocks(db, { project_key: testProjectPath });
+			const result = await getFileLocks(testProjectPath, { project_key: testProjectPath });
 
 			expect(result.length).toBeGreaterThan(0);
 		});
@@ -431,7 +422,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 				],
 			);
 
-			const result = await getFileLocks(db);
+			const result = await getFileLocks(testProjectPath);
 
 			// Should NOT include released reservation
 			const releasedLock = result.find((l) => l.path === "src/old-reservation");
@@ -439,8 +430,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return empty array when no active reservations", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getFileLocks(db, { project_key: "/no-locks" });
+			const result = await getFileLocks(testProjectPath + "-no-locks", { project_key: "/no-locks" });
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBe(0);
@@ -449,16 +439,14 @@ describe("Dashboard Data Layer - RED Phase", () => {
 
 	describe("getRecentMessages()", () => {
 		test("should return array of RecentMessage objects", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db);
+			const result = await getRecentMessages(testProjectPath);
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBeGreaterThan(0);
 		});
 
 		test("should include id, from, to, subject, timestamp, and importance", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db);
+			const result = await getRecentMessages(testProjectPath);
 
 			const message = result[0];
 			expect(message).toHaveProperty("id");
@@ -480,8 +468,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return messages ordered by timestamp descending (newest first)", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db);
+			const result = await getRecentMessages(testProjectPath);
 
 			// First message should be the latest (timestamp 4000)
 			expect(result[0].subject).toContain("BLOCKED");
@@ -495,39 +482,34 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should limit results to specified count", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db, { limit: 2 });
+			const result = await getRecentMessages(testProjectPath, { limit: 2 });
 
 			expect(result.length).toBeLessThanOrEqual(2);
 		});
 
 		test("should default to limit of 10 when not specified", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db);
+			const result = await getRecentMessages(testProjectPath);
 
 			// Even if we have fewer messages, should not exceed 10
 			expect(result.length).toBeLessThanOrEqual(10);
 		});
 
 		test("should filter by thread_id when provided", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db, { thread_id: "epic-1" });
+			const result = await getRecentMessages(testProjectPath, { thread_id: "epic-1" });
 
 			expect(result.length).toBeGreaterThan(0);
 			// All messages should be from epic-1 thread
 		});
 
 		test("should filter by importance when provided", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db, { importance: "high" });
+			const result = await getRecentMessages(testProjectPath, { importance: "high" });
 
 			// Should only include high importance messages
 			expect(result.every((m) => m.importance === "high")).toBe(true);
 		});
 
 		test("should return empty array when no messages found", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getRecentMessages(db, { thread_id: "nonexistent" });
+			const result = await getRecentMessages(testProjectPath, { thread_id: "nonexistent" });
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBe(0);
@@ -536,16 +518,14 @@ describe("Dashboard Data Layer - RED Phase", () => {
 
 	describe("getEpicList()", () => {
 		test("should return array of EpicInfo objects", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db);
+			const result = await getEpicList(testProjectPath);
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBeGreaterThan(0);
 		});
 
 		test("should include epic_id, title, subtask_count, and completed_count", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db);
+			const result = await getEpicList(testProjectPath);
 
 			const epic = result[0];
 			expect(epic).toHaveProperty("epic_id");
@@ -561,8 +541,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should include all epics from hive", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db);
+			const result = await getEpicList(testProjectPath);
 
 			const epicIds = result.map((e) => e.epic_id);
 			expect(epicIds).toContain("epic-1");
@@ -570,8 +549,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should calculate subtask_count correctly", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db);
+			const result = await getEpicList(testProjectPath);
 
 			// epic-1 has 3 subtasks (epic-1.1, epic-1.2, epic-1.3)
 			const epic1 = result.find((e) => e.epic_id === "epic-1");
@@ -583,8 +561,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should calculate completed_count correctly", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db);
+			const result = await getEpicList(testProjectPath);
 
 			// epic-1 has 0 completed subtasks (all in_progress or blocked)
 			const epic1 = result.find((e) => e.epic_id === "epic-1");
@@ -592,8 +569,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should filter by status when provided", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db, { status: "in_progress" });
+			const result = await getEpicList(testProjectPath, { status: "in_progress" });
 
 			// Should only include epics with in_progress status
 			expect(result.some((e) => e.epic_id === "epic-1")).toBe(true);
@@ -601,8 +577,7 @@ describe("Dashboard Data Layer - RED Phase", () => {
 		});
 
 		test("should return empty array when no epics found", async () => {
-			const db = await swarmMail.getDatabase();
-			const result = await getEpicList(db, { status: "completed" });
+			const result = await getEpicList(testProjectPath, { status: "completed" });
 
 			expect(Array.isArray(result)).toBe(true);
 			expect(result.length).toBe(0);

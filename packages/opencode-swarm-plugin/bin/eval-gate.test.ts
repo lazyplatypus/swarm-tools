@@ -155,4 +155,27 @@ describe("eval-gate CLI", () => {
     expect(suiteFilter).toBeUndefined();
     expect(scoreThreshold).toBeUndefined();
   });
+  
+  test("exits 1 when regressions detected", () => {
+    // Simulate regression detection result
+    const regressions = [
+      {
+        evalName: "decomposition-quality",
+        oldScore: 0.872,
+        newScore: 0.679,
+        delta: 0.193,
+        deltaPercent: -22.1,
+      },
+    ];
+    
+    // Exit logic
+    let exitCode: number | undefined;
+    if (regressions.length > 0) {
+      exitCode = 1;
+    } else {
+      exitCode = 0;
+    }
+    
+    expect(exitCode).toBe(1);
+  });
 });

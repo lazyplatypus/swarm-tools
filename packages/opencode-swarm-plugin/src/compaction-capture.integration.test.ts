@@ -5,27 +5,46 @@
  * and that all event types are captured with correct data.
  */
 
-import { describe, expect, it, afterAll } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { describe, expect, it, beforeAll, afterAll } from "bun:test";
+import { existsSync, unlinkSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   captureCompactionEvent,
   readSessionEvents,
   getSessionPath,
+  ensureSessionDir,
 } from "./eval-capture";
 
 describe("Compaction Event Capture Integration", () => {
+  let testDir: string;
+  let originalSessionsDir: string | undefined;
   const testSessionId = `test-compaction-${Date.now()}`;
-  const sessionPath = getSessionPath(testSessionId);
 
-  afterAll(() => {
-    // Clean up test session file
-    if (existsSync(sessionPath)) {
-      unlinkSync(sessionPath);
-    }
+  beforeAll(() => {
+    // Create temp directory for test sessions
+    testDir = mkdtempSync(join(tmpdir(), "compaction-test-"));
+    originalSessionsDir = process.env.SWARM_SESSIONS_DIR;
+    process.env.SWARM_SESSIONS_DIR = testDir;
+    
+    // Ensure directory exists
+    ensureSessionDir();
   });
 
-  it("captures detection_complete event with confidence and reasons", () => {
-    captureCompactionEvent({
+  afterAll(() => {
+    // Restore original env var
+    if (originalSessionsDir !== undefined) {
+      process.env.SWARM_SESSIONS_DIR = originalSessionsDir;
+    } else {
+      delete process.env.SWARM_SESSIONS_DIR;
+    }
+    
+    // Clean up test directory
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("captures detection_complete event with confidence and reasons", async () => {
+    await captureCompactionEvent({
       session_id: testSessionId,
       epic_id: "bd-test-123",
       compaction_type: "detection_complete",
@@ -42,6 +61,7 @@ describe("Compaction Event Capture Integration", () => {
     });
 
     // Verify event was written to session file
+    const sessionPath = getSessionPath(testSessionId);
     expect(existsSync(sessionPath)).toBe(true);
 
     // Read events from session
@@ -63,7 +83,7 @@ describe("Compaction Event Capture Integration", () => {
     expect(event.payload.subtask_count).toBe(5);
   });
 
-  it("captures prompt_generated event with FULL prompt content", () => {
+  it("captures prompt_generated event with FULL prompt content", async () => {
     const fullPrompt = `
 ┌─────────────────────────────────────────┐
 │   🐝  YOU ARE THE COORDINATOR  🐝       │
@@ -84,7 +104,7 @@ describe("Compaction Event Capture Integration", () => {
 3. Spawn remaining subtasks
 `.trim();
 
-    captureCompactionEvent({
+    await captureCompactionEvent({
       session_id: testSessionId,
       epic_id: "bd-epic-456",
       compaction_type: "prompt_generated",
@@ -108,7 +128,7 @@ describe("Compaction Event Capture Integration", () => {
     }
   });
 
-  it("captures context_injected event with FULL content", () => {
+  it("captures context_injected event with FULL content", async () => {
     const fullContent = `[Swarm compaction: LLM-generated, high confidence]
 
 # 🐝 Swarm State
@@ -128,7 +148,7 @@ describe("Compaction Event Capture Integration", () => {
 ✅ ALWAYS review with swarm_review
 `;
 
-    captureCompactionEvent({
+    await captureCompactionEvent({
       session_id: testSessionId,
       epic_id: "bd-epic-789",
       compaction_type: "context_injected",
@@ -152,7 +172,7 @@ describe("Compaction Event Capture Integration", () => {
     }
   });
 
-  it("captures all three event types in sequence", () => {
+  it("captures all three event types in sequence", async () => {
     const sequenceSessionId = `test-sequence-${Date.now()}`;
     const sequencePath = getSessionPath(sequenceSessionId);
 
@@ -160,7 +180,7 @@ describe("Compaction Event Capture Integration", () => {
       // Simulate compaction lifecycle
       
       // 1. Detection
-      captureCompactionEvent({
+      await captureCompactionEvent({
         session_id: sequenceSessionId,
         epic_id: "bd-seq-123",
         compaction_type: "detection_complete",
@@ -172,7 +192,7 @@ describe("Compaction Event Capture Integration", () => {
       });
 
       // 2. Prompt generation
-      captureCompactionEvent({
+      await captureCompactionEvent({
         session_id: sequenceSessionId,
         epic_id: "bd-seq-123",
         compaction_type: "prompt_generated",
@@ -183,7 +203,7 @@ describe("Compaction Event Capture Integration", () => {
       });
 
       // 3. Context injection
-      captureCompactionEvent({
+      await captureCompactionEvent({
         session_id: sequenceSessionId,
         epic_id: "bd-seq-123",
         compaction_type: "context_injected",
@@ -214,10 +234,10 @@ describe("Compaction Event Capture Integration", () => {
     }
   });
 
-  it("validates event schema with Zod", () => {
+  it("validates event schema with Zod", async () => {
     // This should not throw - captureCompactionEvent validates internally
-    expect(() => {
-      captureCompactionEvent({
+    await expect(async () => {
+      await captureCompactionEvent({
         session_id: testSessionId,
         epic_id: "bd-validate-123",
         compaction_type: "detection_complete",
@@ -226,20 +246,20 @@ describe("Compaction Event Capture Integration", () => {
     }).not.toThrow();
   });
 
-  it("rejects invalid compaction_type", () => {
-    expect(() => {
+  it("rejects invalid compaction_type", async () => {
+    await expect(
       captureCompactionEvent({
         session_id: testSessionId,
         epic_id: "bd-invalid-123",
         // @ts-expect-error - intentionally invalid type
         compaction_type: "invalid_type",
         payload: {},
-      });
-    }).toThrow();
+      })
+    ).rejects.toThrow();
   });
 
-  it("handles empty epic_id gracefully", () => {
-    captureCompactionEvent({
+  it("handles empty epic_id gracefully", async () => {
+    await captureCompactionEvent({
       session_id: testSessionId,
       epic_id: "unknown",
       compaction_type: "detection_complete",

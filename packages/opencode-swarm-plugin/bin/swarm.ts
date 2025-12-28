@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * OpenCode Swarm Plugin CLI
  *
@@ -86,11 +86,16 @@ import {
   parseTimePeriod,
   aggregateByStrategy,
 } from "../src/observability-tools.js";
+import {
+  getObservabilityHealth,
+  formatHealthDashboard,
+} from "../src/observability-health.js";
 
 // Eval tools
 import { getPhase, getScoreHistory, recordEvalRun, getEvalHistoryPath } from "../src/eval-history.js";
 import { DEFAULT_THRESHOLDS, checkGate } from "../src/eval-gates.js";
 import { captureCompactionEvent } from "../src/eval-capture.js";
+import { detectRegressions } from "../src/regression-detection.js";
 
 // All tools (for tool command)
 import { allTools } from "../src/index.js";
@@ -2704,26 +2709,30 @@ async function dashboard() {
 
       // Worker Status
       console.log(cyan("Worker Status:"));
-      const workers = await getWorkerStatus(projectPath, parsed.epic);
+      const workers = await getWorkerStatus(projectPath, parsed.epic ? { project_key: parsed.epic } : undefined);
       if (workers.length === 0) {
         console.log(dim("  No active workers"));
       } else {
         for (const w of workers) {
-          console.log(`  ${w.agent_name} - ${w.status} - ${w.current_bead_id || "idle"}`);
+          console.log(`  ${w.agent_name} - ${w.status} - ${w.current_task || "idle"}`);
         }
       }
       console.log();
 
       // Subtask Progress
       console.log(cyan("Subtask Progress:"));
-      const progress = await getSubtaskProgress(projectPath, parsed.epic);
-      if (progress.length === 0) {
-        console.log(dim("  No subtasks"));
-      } else {
-        for (const p of progress) {
-          const bar = "█".repeat(Math.floor(p.progress / 10)) + "░".repeat(10 - Math.floor(p.progress / 10));
-          console.log(`  ${p.bead_id} [${bar}] ${p.progress}% - ${p.status}`);
+      if (parsed.epic) {
+        const progress = await getSubtaskProgress(projectPath, parsed.epic);
+        if (progress.length === 0) {
+          console.log(dim("  No subtasks"));
+        } else {
+          for (const p of progress) {
+            const bar = "█".repeat(Math.floor(p.progress_percent / 10)) + "░".repeat(10 - Math.floor(p.progress_percent / 10));
+            console.log(`  ${p.bead_id} [${bar}] ${p.progress_percent}% - ${p.status}`);
+          }
         }
+      } else {
+        console.log(dim("  No epic specified (use --epic <id>)"));
       }
       console.log();
 
@@ -2734,20 +2743,21 @@ async function dashboard() {
         console.log(dim("  No active locks"));
       } else {
         for (const lock of locks) {
-          console.log(`  ${lock.path_pattern} - ${lock.agent_name} (${lock.exclusive ? "exclusive" : "shared"})`);
+          console.log(`  ${lock.path} - ${lock.agent_name}`);
         }
       }
       console.log();
 
       // Recent Messages
       console.log(cyan("Recent Messages:"));
-      const messages = await getRecentMessages(projectPath, parsed.epic, 5);
+      const messages = await getRecentMessages(projectPath, { limit: 5, thread_id: parsed.epic });
       if (messages.length === 0) {
         console.log(dim("  No recent messages"));
       } else {
         for (const msg of messages) {
           const timeAgo = Math.floor((Date.now() - new Date(msg.timestamp).getTime()) / 1000);
-          console.log(`  ${msg.from_agent} → ${msg.to_agents}: ${msg.subject} (${timeAgo}s ago)`);
+          const toList = Array.isArray(msg.to) ? msg.to.join(", ") : "unknown";
+          console.log(`  ${msg.from || "unknown"} → ${toList}: ${msg.subject} (${timeAgo}s ago)`);
         }
       }
       console.log();
@@ -2986,6 +2996,7 @@ ${cyan("Commands:")}
   swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
   swarm log       View swarm logs with filtering
   swarm stats     Show swarm health metrics powered by swarm-insights (strategy success rates, patterns)
+  swarm o11y      Show observability health - hook coverage, event capture, session quality
   swarm history   Show recent swarm activity timeline with insights data
   swarm eval      Eval-driven development commands
   swarm query     SQL analytics with presets (--sql, --preset, --format)
@@ -3028,7 +3039,10 @@ ${cyan("Log Viewing:")}
 ${cyan("Stats & History:")}
   swarm stats                          Show swarm health metrics powered by swarm-insights (last 7 days)
   swarm stats --since 24h              Show stats for custom time period
+  swarm stats --regressions            Show eval regressions (>10% score drops)
   swarm stats --json                   Output as JSON for scripting
+  swarm o11y                           Show observability health dashboard (hook coverage, events, sessions)
+  swarm o11y --since 7d                Custom time period for event stats (default: 7 days)
   swarm history                        Show recent swarm activity timeline with insights data (last 10)
   swarm history --limit 20             Show more swarms
   swarm history --status success       Filter by success/failed/in_progress
@@ -4526,6 +4540,7 @@ async function stats() {
 	const args = process.argv.slice(3);
 	let period = "7d"; // default to 7 days
 	let format: "text" | "json" = "text";
+	let showRegressions = false;
 
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--since" || args[i] === "-s") {
@@ -4533,6 +4548,8 @@ async function stats() {
 			i++;
 		} else if (args[i] === "--json") {
 			format = "json";
+		} else if (args[i] === "--regressions") {
+			showRegressions = true;
 		}
 	}
 
@@ -4665,19 +4682,81 @@ async function stats() {
 			recentDays: Math.round(periodDays * 10) / 10,
 		};
 
-		// Output
-		if (format === "json") {
-			console.log(JSON.stringify(stats, null, 2));
+		// If --regressions flag, show regression detection results
+		if (showRegressions) {
+			const regressions = detectRegressions(projectPath, 0.10);
+			
+			if (format === "json") {
+				console.log(JSON.stringify({ stats, regressions }, null, 2));
+			} else {
+				console.log();
+				console.log(formatSwarmStats(stats));
+				console.log();
+				
+				if (regressions.length > 0) {
+					console.log("\n⚠️  EVAL REGRESSIONS DETECTED");
+					for (const reg of regressions) {
+						const oldPercent = (reg.oldScore * 100).toFixed(1);
+						const newPercent = (reg.newScore * 100).toFixed(1);
+						const deltaPercent = reg.deltaPercent.toFixed(1);
+						console.log(`├── ${reg.evalName}: ${oldPercent}% → ${newPercent}% (${deltaPercent}%)`);
+					}
+					console.log(`└── Threshold: 10%\n`);
+				} else {
+					console.log("✅ No eval regressions detected (>10% threshold)\n");
+				}
+			}
 		} else {
-			console.log();
-			console.log(formatSwarmStats(stats));
-			console.log();
+			// Normal stats output
+			if (format === "json") {
+				console.log(JSON.stringify(stats, null, 2));
+			} else {
+				console.log();
+				console.log(formatSwarmStats(stats));
+				console.log();
+			}
 		}
 
 		p.outro("Stats ready!");
 	} catch (error) {
 		p.log.error(error instanceof Error ? error.message : String(error));
 		p.outro("Failed to load stats");
+		process.exit(1);
+	}
+}
+
+// ============================================================================
+// O11y Health Command
+// ============================================================================
+
+async function o11y() {
+	p.intro("swarm o11y");
+
+	// Parse args
+	const args = process.argv.slice(3);
+	let period = 7; // default to 7 days
+
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--since" || args[i] === "-s") {
+			const periodStr = args[i + 1] || "7d";
+			const match = periodStr.match(/^(\d+)d$/);
+			period = match ? Number.parseInt(match[1], 10) : 7;
+			i++;
+		}
+	}
+
+	try {
+		const projectPath = process.cwd();
+		const health = await getObservabilityHealth(projectPath, { days: period });
+
+		console.log();
+		console.log(formatHealthDashboard(health));
+		console.log();
+
+		p.outro("Health check complete!");
+	} catch (error) {
+		p.log.error(error instanceof Error ? error.message : String(error));
+		p.outro("Failed to load health metrics");
 		process.exit(1);
 	}
 }
@@ -5238,6 +5317,9 @@ switch (command) {
     break;
   case "stats":
     await stats();
+    break;
+  case "o11y":
+    await o11y();
     break;
   case "history":
     await swarmHistory();

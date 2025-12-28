@@ -14,6 +14,7 @@ import {
 	clearAdapterCache,
 	createInMemorySwarmMailLibSQL,
 } from "swarm-mail";
+import { clearHiveAdapterCache } from "./hive";
 import { swarm_complete } from "./swarm-orchestrate";
 
 describe("swarm_complete integration", () => {
@@ -39,6 +40,7 @@ describe("swarm_complete integration", () => {
 		// Clean up
 		await swarmMail.close();
 		clearAdapterCache();
+		clearHiveAdapterCache();
 		rmSync(testProjectPath, { recursive: true, force: true });
 	});
 
@@ -93,6 +95,7 @@ describe("swarm_recover integration", () => {
 	afterEach(async () => {
 		await swarmMail.close();
 		clearAdapterCache();
+		clearHiveAdapterCache();
 		rmSync(testProjectPath, { recursive: true, force: true });
 	});
 
@@ -149,6 +152,7 @@ describe("E2E swarm coordination", () => {
 		// Clean up
 		await swarmMail.close();
 		clearAdapterCache();
+		clearHiveAdapterCache();
 		rmSync(testProjectPath, { recursive: true, force: true });
 	});
 

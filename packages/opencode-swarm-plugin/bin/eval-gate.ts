@@ -9,6 +9,7 @@
  */
 
 import { runEvals } from "../src/eval-runner.js";
+import { detectRegressions } from "../src/regression-detection.js";
 
 const args = process.argv.slice(2);
 
@@ -51,6 +52,20 @@ async function main() {
     console.log("");
   }
   
+  // Check for regressions
+  const regressions = detectRegressions(process.cwd(), 0.10);
+  
+  if (regressions.length > 0) {
+    console.error("\n⚠️  REGRESSION DETECTED");
+    for (const reg of regressions) {
+      const oldPercent = (reg.oldScore * 100).toFixed(1);
+      const newPercent = (reg.newScore * 100).toFixed(1);
+      const deltaPercent = reg.deltaPercent.toFixed(1);
+      console.error(`├── ${reg.evalName}: ${oldPercent}% → ${newPercent}% (${deltaPercent}%)`);
+    }
+    console.error(`└── Threshold: 10%\n`);
+  }
+  
   // Check for gate failures
   const failedGates = result.gateResults?.filter(g => !g.passed) || [];
   
@@ -61,6 +76,12 @@ async function main() {
   
   if (!result.success) {
     console.error(`❌ Evals failed threshold check`);
+    process.exit(1);
+  }
+  
+  // Exit non-zero if regressions detected (alerting mode)
+  if (regressions.length > 0) {
+    console.error(`❌ ${regressions.length} regression(s) detected!`);
     process.exit(1);
   }
   

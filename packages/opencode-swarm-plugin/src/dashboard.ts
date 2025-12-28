@@ -10,6 +10,7 @@
  */
 
 import type { DatabaseAdapter } from "swarm-mail";
+import { getSwarmMailLibSQL } from "swarm-mail";
 
 export interface WorkerStatus {
 	agent_name: string;
@@ -54,9 +55,11 @@ export interface EpicInfo {
  * Derives status from latest events: task_started, progress_reported, task_blocked, etc.
  */
 export async function getWorkerStatus(
-	db: DatabaseAdapter,
+	projectPath: string,
 	options?: { project_key?: string },
 ): Promise<WorkerStatus[]> {
+	const swarmMail = await getSwarmMailLibSQL(projectPath);
+	const db = await swarmMail.getDatabase();
 	// Query for latest task-related events per agent+bead, then pick primary status
 	const query = `
 		WITH latest_per_bead AS (
@@ -131,9 +134,11 @@ export async function getWorkerStatus(
  * Returns completion percentage from progress_reported events.
  */
 export async function getSubtaskProgress(
-	db: DatabaseAdapter,
+	projectPath: string,
 	epic_id: string,
 ): Promise<SubtaskProgress[]> {
+	const swarmMail = await getSwarmMailLibSQL(projectPath);
+	const db = await swarmMail.getDatabase();
 	// Get all subtasks from any task-related events matching epic prefix
 	const query = `
 		WITH all_tasks AS (
@@ -195,9 +200,11 @@ export async function getSubtaskProgress(
  * Excludes released reservations.
  */
 export async function getFileLocks(
-	db: DatabaseAdapter,
+	projectPath: string,
 	options?: { project_key?: string },
 ): Promise<FileLock[]> {
+	const swarmMail = await getSwarmMailLibSQL(projectPath);
+	const db = await swarmMail.getDatabase();
 	// Query for active reservations (acquired but not released)
 	const query = `
 		WITH acquired AS (
@@ -253,13 +260,15 @@ export async function getFileLocks(
  * Defaults to limit of 10.
  */
 export async function getRecentMessages(
-	db: DatabaseAdapter,
+	projectPath: string,
 	options?: {
 		limit?: number;
 		thread_id?: string;
 		importance?: "low" | "normal" | "high" | "urgent";
 	},
 ): Promise<RecentMessage[]> {
+	const swarmMail = await getSwarmMailLibSQL(projectPath);
+	const db = await swarmMail.getDatabase();
 	const limit = options?.limit ?? 10;
 	
 	// Build WHERE clause dynamically
@@ -319,9 +328,11 @@ export async function getRecentMessages(
  * In production, queries beads table directly.
  */
 export async function getEpicList(
-	db: DatabaseAdapter,
+	projectPath: string,
 	options?: { status?: "open" | "in_progress" | "completed" | "blocked" },
 ): Promise<EpicInfo[]> {
+	const swarmMail = await getSwarmMailLibSQL(projectPath);
+	const db = await swarmMail.getDatabase();
 	// Check if beads table exists
 	const tablesResult = await db.query<{ name: string }>(
 		"SELECT name FROM sqlite_master WHERE type = ? AND name = ?",

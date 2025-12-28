@@ -1,26 +1,34 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, mock } from "bun:test";
 import { mkdir, rm, readdir, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+import pino from "pino";
 
+/**
+ * Logger tests that don't rely on module cache clearing.
+ * 
+ * Instead of trying to reset the cached logger instances (which doesn't work in Bun ESM),
+ * we test the logger behavior directly using unique log directories per test.
+ * The logger module caches by logDir path, so unique paths = unique instances.
+ */
 describe("Logger Infrastructure", () => {
-  const testLogDir = join(homedir(), ".config", "swarm-tools", "logs-test");
+  let tempRoot: string;
   let originalLogFile: string | undefined;
 
-  beforeEach(async () => {
-    // Clean up test log directory
-    if (existsSync(testLogDir)) {
-      await rm(testLogDir, { recursive: true, force: true });
-    }
-    await mkdir(testLogDir, { recursive: true });
-    
-    // Save and enable file logging for tests
-    originalLogFile = process.env.SWARM_LOG_FILE;
-    process.env.SWARM_LOG_FILE = "1";
+  beforeAll(() => {
+    // Create isolated temp directory for logger tests
+    tempRoot = mkdtempSync(join(tmpdir(), "swarm-test-logger-"));
+  });
 
-    // Clear module cache to reset logger instances
-    delete require.cache[require.resolve("./logger")];
+  afterAll(() => {
+    // Clean up temp directory
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    // Save original env
+    originalLogFile = process.env.SWARM_LOG_FILE;
   });
 
   afterEach(async () => {
@@ -30,15 +38,14 @@ describe("Logger Infrastructure", () => {
     } else {
       delete process.env.SWARM_LOG_FILE;
     }
-
-    // Clean up test directory
-    if (existsSync(testLogDir)) {
-      await rm(testLogDir, { recursive: true, force: true });
-    }
   });
 
   describe("getLogger", () => {
     test("returns a valid Pino logger instance", async () => {
+      // Use unique dir to avoid cache conflicts
+      const testLogDir = join(tempRoot, `test-${Date.now()}-1`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { getLogger } = await import("./logger");
       const logger = getLogger(testLogDir);
 
@@ -50,15 +57,19 @@ describe("Logger Infrastructure", () => {
     });
 
     test("creates log directory if it doesn't exist", async () => {
-      const newDir = join(testLogDir, "nested", "path");
+      const testLogDir = join(tempRoot, `test-${Date.now()}-2`, "nested", "path");
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { getLogger } = await import("./logger");
+      getLogger(testLogDir);
 
-      getLogger(newDir);
-
-      expect(existsSync(newDir)).toBe(true);
+      expect(existsSync(testLogDir)).toBe(true);
     });
 
     test("creates log file when SWARM_LOG_FILE=1", async () => {
+      const testLogDir = join(tempRoot, `test-${Date.now()}-3`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { getLogger } = await import("./logger");
       const logger = getLogger(testLogDir);
 
@@ -73,6 +84,9 @@ describe("Logger Infrastructure", () => {
     });
 
     test("writes log entries to file", async () => {
+      const testLogDir = join(tempRoot, `test-${Date.now()}-4`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { getLogger } = await import("./logger");
       const logger = getLogger(testLogDir);
 
@@ -92,8 +106,10 @@ describe("Logger Infrastructure", () => {
 
   describe("createChildLogger", () => {
     test("creates child logger with module namespace", async () => {
+      const testLogDir = join(tempRoot, `test-${Date.now()}-5`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { createChildLogger } = await import("./logger");
-
       const childLogger = createChildLogger("compaction", testLogDir);
 
       expect(childLogger).toBeDefined();
@@ -101,8 +117,10 @@ describe("Logger Infrastructure", () => {
     });
 
     test("child logger writes to module-specific file", async () => {
+      const testLogDir = join(tempRoot, `test-${Date.now()}-6`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { createChildLogger } = await import("./logger");
-
       const childLogger = createChildLogger("compaction", testLogDir);
       childLogger.info("compaction test message");
 
@@ -114,8 +132,10 @@ describe("Logger Infrastructure", () => {
     });
 
     test("multiple child loggers write to separate files", async () => {
+      const testLogDir = join(tempRoot, `test-${Date.now()}-7`);
+      process.env.SWARM_LOG_FILE = "1";
+      
       const { createChildLogger } = await import("./logger");
-
       const compactionLogger = createChildLogger("compaction", testLogDir);
       const cliLogger = createChildLogger("cli", testLogDir);
 
@@ -133,12 +153,13 @@ describe("Logger Infrastructure", () => {
 
   describe("stdout mode (default)", () => {
     test("works without file logging by default", async () => {
+      // Use a unique directory to get a fresh logger instance
+      const testLogDir = join(tempRoot, `test-stdout-${Date.now()}-8`);
+      await mkdir(testLogDir, { recursive: true });
       delete process.env.SWARM_LOG_FILE;
 
-      // Force reimport
-      delete require.cache[require.resolve("./logger")];
+      // Import logger - since we use a unique path, cache won't interfere
       const { getLogger } = await import("./logger");
-
       const logger = getLogger(testLogDir);
 
       expect(logger).toBeDefined();
@@ -147,19 +168,20 @@ describe("Logger Infrastructure", () => {
     });
 
     test("does not create log files when SWARM_LOG_FILE is not set", async () => {
+      // Use a unique directory to get a fresh logger instance
+      const testLogDir = join(tempRoot, `test-stdout-${Date.now()}-9`);
+      await mkdir(testLogDir, { recursive: true });
       delete process.env.SWARM_LOG_FILE;
 
-      // Force reimport
-      delete require.cache[require.resolve("./logger")];
+      // Import logger - since we use a unique path, cache won't interfere
       const { getLogger } = await import("./logger");
-
       const logger = getLogger(testLogDir);
       logger.info("this goes to stdout");
 
       // Wait a bit
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Log directory should exist (we created it in beforeEach) but no log files
+      // Log directory should exist but no log files (stdout mode)
       const files = await readdir(testLogDir);
       const logFiles = files.filter(f => f.endsWith(".log"));
       expect(logFiles).toHaveLength(0);

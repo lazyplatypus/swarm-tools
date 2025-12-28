@@ -412,10 +412,10 @@ const swarm_diagnose = tool({
 			// Query for errors
 			if (include.includes("errors")) {
 				const errorQuery = `
-					SELECT type, json_extract(data, '$.error_count') as error_count
+					SELECT type, json_extract(data, '$.success') as success
 					FROM events
 					WHERE type = 'subtask_outcome'
-					AND json_extract(data, '$.success') = 'false'
+					AND json_extract(data, '$.success') = 0
 					${args.epic_id ? "AND json_extract(data, '$.epic_id') = ?" : ""}
 					${args.bead_id ? "AND json_extract(data, '$.bead_id') = ?" : ""}
 					LIMIT 10
@@ -519,7 +519,7 @@ const swarm_insights = tool({
 			if (args.metrics.includes("success_rate")) {
 				const query = `
 					SELECT
-						SUM(CASE WHEN json_extract(data, '$.success') = 'true' THEN 1 ELSE 0 END) as successes,
+						SUM(CASE WHEN json_extract(data, '$.success') = 1 THEN 1 ELSE 0 END) as successes,
 						COUNT(*) as total
 					FROM events
 					WHERE type = 'subtask_outcome'
@@ -550,6 +550,8 @@ const swarm_insights = tool({
 					SELECT AVG(CAST(json_extract(data, '$.duration_ms') AS REAL)) as avg_duration
 					FROM events
 					WHERE type = 'subtask_outcome'
+					AND json_extract(data, '$.success') = 1
+					AND json_extract(data, '$.duration_ms') IS NOT NULL
 					${args.epic_id ? "AND json_extract(data, '$.epic_id') = ?" : ""}
 				`;
 
@@ -613,9 +615,9 @@ export function formatSwarmStats(stats: SwarmStatsData): string {
 	const lines: string[] = [];
 
 	// Header with ASCII art
-	lines.push("┌─────────────────────────────────────────┐");
-	lines.push("│        🐝  SWARM STATISTICS  🐝         │");
-	lines.push("├─────────────────────────────────────────┤");
+	lines.push("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+	lines.push("\u2502        🐝  SWARM STATISTICS  🐝         \u2502");
+	lines.push("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524");
 
 	// Overall stats
 	const totalStr = stats.overall.totalSwarms.toString().padEnd(4);
@@ -623,33 +625,33 @@ export function formatSwarmStats(stats: SwarmStatsData): string {
 	lines.push(`│ Total Swarms: ${totalStr} Success: ${rateStr}      │`);
 	
 	const durationStr = stats.overall.avgDurationMin.toFixed(1);
-	lines.push(`│ Avg Duration: ${durationStr}min${" ".repeat(23 - durationStr.length)}│`);
-	lines.push("├─────────────────────────────────────────┤");
+	lines.push(`\u2502 Avg Duration: ${durationStr}min${" ".repeat(23 - durationStr.length)}\u2502`);
+	lines.push("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524");
 
 	// Strategy breakdown
-	lines.push("│ BY STRATEGY                             │");
+	lines.push("\u2502 BY STRATEGY                             \u2502");
 	if (stats.byStrategy.length === 0) {
-		lines.push("│ ├─ No data yet                          │");
+		lines.push("\u2502 \u251C\u2500 No data yet                          \u2502");
 	} else {
 		for (const strategy of stats.byStrategy) {
 			const label = strategy.strategy.padEnd(15);
 			const rate = `${Math.round(strategy.successRate)}%`.padStart(4);
 			const counts = `(${strategy.successes}/${strategy.total})`.padEnd(8);
-			lines.push(`│ ├─ ${label} ${rate} ${counts}     │`);
+			lines.push(`\u2502 \u251C\u2500 ${label} ${rate} ${counts}     \u2502`);
 		}
 	}
-	lines.push("├─────────────────────────────────────────┤");
+	lines.push("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524");
 
 	// Coordinator health
-	lines.push("│ COORDINATOR HEALTH                      │");
+	lines.push("\u2502 COORDINATOR HEALTH                      \u2502");
 	const violationStr = `${Math.round(stats.coordinator.violationRate)}%`.padStart(3);
 	const spawnStr = `${Math.round(stats.coordinator.spawnEfficiency)}%`.padStart(4);
 	const reviewStr = `${Math.round(stats.coordinator.reviewThoroughness)}%`.padStart(3);
 	
-	lines.push(`│ Violation Rate:   ${violationStr}${" ".repeat(19 - violationStr.length)}│`);
-	lines.push(`│ Spawn Efficiency: ${spawnStr}${" ".repeat(17 - spawnStr.length)}│`);
-	lines.push(`│ Review Rate:      ${reviewStr}${" ".repeat(19 - reviewStr.length)}│`);
-	lines.push("└─────────────────────────────────────────┘");
+	lines.push(`\u2502 Violation Rate:   ${violationStr}${" ".repeat(19 - violationStr.length)}\u2502`);
+	lines.push(`\u2502 Spawn Efficiency: ${spawnStr}${" ".repeat(17 - spawnStr.length)}\u2502`);
+	lines.push(`\u2502 Review Rate:      ${reviewStr}${" ".repeat(19 - reviewStr.length)}\u2502`);
+	lines.push("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
 	
 	lines.push("");
 	lines.push(`📊 Stats for last ${stats.recentDays} days`);
@@ -726,7 +728,11 @@ export interface SwarmHistoryRecord {
 }
 
 /**
- * Query swarm history from eval_records table
+ * Query swarm history from swarm events
+ * 
+ * Constructs epic-level view from decomposition_generated and subtask_outcome events:
+ * - decomposition_generated: epic_id, task (title), strategy, subtask_count
+ * - subtask_outcome: count successful completed tasks per epic
  */
 export async function querySwarmHistory(
 	projectPath: string,
@@ -739,65 +745,88 @@ export async function querySwarmHistory(
 	const swarmMail = await getSwarmMailLibSQL(projectPath);
 	const db = await swarmMail.getDatabase();
 
-	// Build WHERE clause
-	const conditions: string[] = [];
-	const params: (string | number)[] = [];
-
-	if (options?.status) {
-		switch (options.status) {
-			case "success":
-				conditions.push("json_extract(data, '$.overall_success') = 'true'");
-				break;
-			case "failed":
-				conditions.push(
-					"json_extract(data, '$.overall_success') = 'false' AND json_extract(data, '$.completed_count') = json_extract(data, '$.task_count')",
-				);
-				break;
-			case "in_progress":
-				conditions.push(
-					"json_extract(data, '$.completed_count') < json_extract(data, '$.task_count')",
-				);
-				break;
-		}
-	}
-
-	if (options?.strategy) {
-		conditions.push("json_extract(data, '$.strategy') = ?");
-		params.push(options.strategy);
-	}
-
-	const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
 	const limit = options?.limit || 10;
 
+	// Query decomposition_generated events to get epic metadata
 	const query = `
+		WITH decompositions AS (
+			SELECT 
+				json_extract(data, '$.epic_id') as epic_id,
+				json_extract(data, '$.task') as epic_title,
+				json_extract(data, '$.epic_title') as epic_title_alt,
+				json_extract(data, '$.strategy') as strategy,
+				json_array_length(json_extract(data, '$.subtasks')) as task_count,
+				timestamp
+			FROM events
+			WHERE type = 'decomposition_generated'
+			${options?.strategy ? "AND json_extract(data, '$.strategy') = ?" : ""}
+			ORDER BY timestamp DESC
+			LIMIT ?
+		),
+		completions AS (
+			SELECT 
+				json_extract(data, '$.epic_id') as epic_id,
+				COUNT(*) as completed_count
+			FROM events
+			WHERE type = 'subtask_outcome'
+			AND json_extract(data, '$.success') = 1
+			GROUP BY json_extract(data, '$.epic_id')
+		)
 		SELECT 
-			json_extract(data, '$.epic_id') as epic_id,
-			json_extract(data, '$.task') as epic_title,
-			json_extract(data, '$.strategy') as strategy,
-			timestamp,
-			json_extract(data, '$.overall_success') as overall_success,
-			CAST(json_extract(data, '$.task_count') AS INTEGER) as task_count,
-			CAST(json_extract(data, '$.completed_count') AS INTEGER) as completed_count
-		FROM events
-		WHERE type = 'eval_finalized'
-		${whereClause}
-		ORDER BY timestamp DESC
-		LIMIT ?
+			d.epic_id,
+			COALESCE(d.epic_title_alt, d.epic_title, 'Unknown Epic') as epic_title,
+			d.strategy,
+			d.timestamp,
+			d.task_count,
+			COALESCE(c.completed_count, 0) as completed_count,
+			CASE 
+				WHEN COALESCE(c.completed_count, 0) = d.task_count THEN 1
+				ELSE 0
+			END as overall_success
+		FROM decompositions d
+		LEFT JOIN completions c ON d.epic_id = c.epic_id
+		ORDER BY d.timestamp DESC
 	`;
 
+	const params: (string | number)[] = [];
+	if (options?.strategy) {
+		params.push(options.strategy);
+	}
 	params.push(limit);
 
 	const result = await db.query(query, params);
 	const rows = result.rows as unknown[];
 
-	return rows.map((row) => {
+	// Filter by status if requested
+	let filteredRows = rows;
+	if (options?.status) {
+		filteredRows = rows.filter((row) => {
+			const r = row as Record<string, unknown>;
+			const completed = Number(r.completed_count) || 0;
+			const total = Number(r.task_count) || 0;
+			const success = Number(r.overall_success) === 1;
+
+			switch (options.status) {
+				case "success":
+					return success;
+				case "failed":
+					return !success && completed === total;
+				case "in_progress":
+					return completed < total;
+				default:
+					return true;
+			}
+		});
+	}
+
+	return filteredRows.map((row) => {
 		const r = row as Record<string, unknown>;
 		return {
 			epic_id: String(r.epic_id || ""),
 			epic_title: String(r.epic_title || "Unknown"),
 			strategy: String(r.strategy || "unknown"),
-			timestamp: String(r.timestamp || new Date().toISOString()),
-			overall_success: String(r.overall_success) === "true",
+			timestamp: new Date(Number(r.timestamp)).toISOString(),
+			overall_success: Number(r.overall_success) === 1,
 			task_count: Number(r.task_count) || 0,
 			completed_count: Number(r.completed_count) || 0,
 		};
@@ -838,11 +867,11 @@ export function formatSwarmHistory(records: SwarmHistoryRecord[]): string {
 		tasks: `${r.completed_count}/${r.task_count} tasks`,
 	}));
 
-	// Box drawing characters
+	// Box drawing characters (using Unicode escapes to avoid encoding issues)
 	const lines: string[] = [];
-	lines.push("┌─────────────────────────────────────────────────────────────┐");
-	lines.push("│                    SWARM HISTORY                            │");
-	lines.push("├─────────────────────────────────────────────────────────────┤");
+	lines.push("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+	lines.push("\u2502                    SWARM HISTORY                            \u2502");
+	lines.push("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524");
 
 	for (const row of rows) {
 		const statusCol = `${row.time.padEnd(8)} ${row.status}`;
@@ -850,11 +879,11 @@ export function formatSwarmHistory(records: SwarmHistoryRecord[]): string {
 		const strategyCol = row.strategy.padEnd(13);
 		const tasksCol = row.tasks;
 
-		const line = `│ ${statusCol} ${titleCol} ${strategyCol} ${tasksCol.padEnd(3)} │`;
+		const line = `\u2502 ${statusCol} ${titleCol} ${strategyCol} ${tasksCol.padEnd(3)} \u2502`;
 		lines.push(line);
 	}
 
-	lines.push("└─────────────────────────────────────────────────────────────┘");
+	lines.push("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
 
 	return lines.join("\n");
 }

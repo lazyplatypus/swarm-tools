@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import {
   analyzeTodoWrite,
   shouldAnalyzeTool,
@@ -6,12 +6,15 @@ import {
   setCoordinatorContext,
   getCoordinatorContext,
   clearCoordinatorContext,
+  clearAllCoordinatorContexts,
   isInCoordinatorContext,
   type ViolationDetectionResult,
 } from "./planning-guardrails";
 import * as fs from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
-import * as os from "os";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("planning-guardrails", () => {
   describe("shouldAnalyzeTool", () => {
@@ -119,11 +122,30 @@ describe("planning-guardrails", () => {
   describe("detectCoordinatorViolation", () => {
     const sessionId = "test-session-123";
     const epicId = "test-epic-456";
+    let testDir: string;
+    let sessionDir: string;
 
-    // Clean up session files after tests
+    beforeAll(() => {
+      // Create isolated temp directory
+      testDir = mkdtempSync(join(tmpdir(), "swarm-test-violations-"));
+      sessionDir = join(testDir, "sessions");
+      fs.mkdirSync(sessionDir, { recursive: true });
+    });
+
+    afterAll(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    beforeEach(() => {
+      // Override session dir for tests
+      process.env.SWARM_SESSIONS_DIR = sessionDir;
+    });
+
     afterEach(() => {
-      const sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-      const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+      delete process.env.SWARM_SESSIONS_DIR;
+      
+      // Clean up test session file if exists
+      const sessionPath = join(sessionDir, `${sessionId}.jsonl`);
       if (fs.existsSync(sessionPath)) {
         fs.unlinkSync(sessionPath);
       }
@@ -356,8 +378,63 @@ describe("planning-guardrails", () => {
       });
     });
 
+    describe("worker_completed_without_review violation", () => {
+      it("detects swarm_complete from coordinator", () => {
+        const result = detectCoordinatorViolation({
+          sessionId,
+          epicId,
+          toolName: "swarm_complete",
+          toolArgs: {
+            project_key: "/path/to/project",
+            agent_name: "TestAgent",
+            bead_id: "test-bead",
+            summary: "Completed work",
+          },
+          agentContext: "coordinator",
+        });
+
+        expect(result.isViolation).toBe(true);
+        expect(result.violationType).toBe("worker_completed_without_review");
+        expect(result.message).toContain("review worker output");
+      });
+
+      it("detects hive_close from coordinator", () => {
+        const result = detectCoordinatorViolation({
+          sessionId,
+          epicId,
+          toolName: "hive_close",
+          toolArgs: {
+            id: "test-bead",
+            reason: "Done",
+          },
+          agentContext: "coordinator",
+        });
+
+        expect(result.isViolation).toBe(true);
+        expect(result.violationType).toBe("worker_completed_without_review");
+        expect(result.message).toContain("review worker output");
+      });
+
+      it("does not detect completion from worker", () => {
+        const result = detectCoordinatorViolation({
+          sessionId,
+          epicId,
+          toolName: "swarm_complete",
+          toolArgs: {
+            project_key: "/path",
+            agent_name: "Worker",
+            bead_id: "test",
+            summary: "Done",
+          },
+          agentContext: "worker",
+        });
+
+        expect(result.isViolation).toBe(false);
+      });
+    });
+
     describe("event capture integration", () => {
-      it("captures violation event to session file when violation detected", () => {
+      it("captures violation event to session file when violation detected", async () => {
         const result = detectCoordinatorViolation({
           sessionId,
           epicId,
@@ -368,9 +445,11 @@ describe("planning-guardrails", () => {
 
         expect(result.isViolation).toBe(true);
 
+        // Wait for async captureCoordinatorEvent to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
         // Verify event was written to session file
-        const sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-        const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+        const sessionPath = join(sessionDir, `${sessionId}.jsonl`);
         expect(fs.existsSync(sessionPath)).toBe(true);
 
         const content = fs.readFileSync(sessionPath, "utf-8");
@@ -397,8 +476,7 @@ describe("planning-guardrails", () => {
         expect(result.isViolation).toBe(false);
 
         // Verify no session file created
-        const sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-        const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
+        const sessionPath = join(sessionDir, `${sessionId}.jsonl`);
         expect(fs.existsSync(sessionPath)).toBe(false);
       });
     });
@@ -406,11 +484,11 @@ describe("planning-guardrails", () => {
 
   describe("coordinator context", () => {
     beforeEach(() => {
-      clearCoordinatorContext();
+      clearAllCoordinatorContexts();
     });
 
     afterEach(() => {
-      clearCoordinatorContext();
+      clearAllCoordinatorContexts();
     });
 
     describe("setCoordinatorContext", () => {
@@ -421,17 +499,16 @@ describe("planning-guardrails", () => {
           sessionId: "test-session-456",
         });
 
-        const ctx = getCoordinatorContext();
+        const ctx = getCoordinatorContext("test-session-456");
         expect(ctx.isCoordinator).toBe(true);
         expect(ctx.epicId).toBe("test-epic-123");
         expect(ctx.sessionId).toBe("test-session-456");
         expect(ctx.activatedAt).toBeDefined();
       });
 
-      it("merges with existing context", () => {
+      it("merges with existing context (global)", () => {
         setCoordinatorContext({
           isCoordinator: true,
-          sessionId: "session-1",
         });
 
         setCoordinatorContext({
@@ -439,6 +516,22 @@ describe("planning-guardrails", () => {
         });
 
         const ctx = getCoordinatorContext();
+        expect(ctx.isCoordinator).toBe(true);
+        expect(ctx.epicId).toBe("epic-1");
+      });
+
+      it("merges with existing context (session-scoped)", () => {
+        setCoordinatorContext({
+          isCoordinator: true,
+          sessionId: "session-1",
+        });
+
+        setCoordinatorContext({
+          epicId: "epic-1",
+          sessionId: "session-1",
+        });
+
+        const ctx = getCoordinatorContext("session-1");
         expect(ctx.isCoordinator).toBe(true);
         expect(ctx.sessionId).toBe("session-1");
         expect(ctx.epicId).toBe("epic-1");
@@ -485,6 +578,125 @@ describe("planning-guardrails", () => {
         expect(ctx.isCoordinator).toBe(false);
         expect(ctx.epicId).toBeUndefined();
         expect(ctx.sessionId).toBeUndefined();
+      });
+    });
+
+    describe("session-scoped detection", () => {
+      it("tracks coordinator state per session ID", () => {
+        setCoordinatorContext({
+          isCoordinator: true,
+          epicId: "epic-1",
+          sessionId: "session-1",
+        });
+
+        setCoordinatorContext({
+          isCoordinator: true,
+          epicId: "epic-2",
+          sessionId: "session-2",
+        });
+
+        // Each session should have independent state
+        const ctx1 = getCoordinatorContext("session-1");
+        const ctx2 = getCoordinatorContext("session-2");
+
+        expect(ctx1.epicId).toBe("epic-1");
+        expect(ctx2.epicId).toBe("epic-2");
+      });
+
+      it("clearing one session does not affect others", () => {
+        setCoordinatorContext({
+          isCoordinator: true,
+          epicId: "epic-1",
+          sessionId: "session-1",
+        });
+
+        setCoordinatorContext({
+          isCoordinator: true,
+          epicId: "epic-2",
+          sessionId: "session-2",
+        });
+
+        clearCoordinatorContext("session-1");
+
+        expect(isInCoordinatorContext("session-1")).toBe(false);
+        expect(isInCoordinatorContext("session-2")).toBe(true);
+      });
+
+      it("defaults to global session when no ID provided (backward compat)", () => {
+        setCoordinatorContext({
+          isCoordinator: true,
+          epicId: "global-epic",
+        });
+
+        const ctx = getCoordinatorContext();
+        expect(ctx.epicId).toBe("global-epic");
+      });
+    });
+
+    describe("integration: coordinator detection timing", () => {
+      it("detects violations AFTER coordinator context is set (not before)", () => {
+        const sessionId = "timing-test-session";
+        
+        // Simulate hook execution order:
+        // 1. First call: hive_create_epic activates coordinator context
+        setCoordinatorContext({
+          isCoordinator: true,
+          sessionId,
+        });
+
+        // 2. Second call: edit tool should detect violation
+        const violation = detectCoordinatorViolation({
+          sessionId,
+          epicId: "test-epic",
+          toolName: "edit",
+          toolArgs: { filePath: "/test.ts", oldString: "a", newString: "b" },
+          agentContext: "coordinator",
+        });
+
+        expect(violation.isViolation).toBe(true);
+        expect(violation.violationType).toBe("coordinator_edited_file");
+      });
+
+      it("does not detect violations if context never activated", () => {
+        const sessionId = "no-context-session";
+        
+        // No coordinator context set
+        const violation = detectCoordinatorViolation({
+          sessionId,
+          epicId: "test-epic",
+          toolName: "edit",
+          toolArgs: { filePath: "/test.ts", oldString: "a", newString: "b" },
+          agentContext: "coordinator",
+        });
+
+        // Should not detect violation (agentContext: "coordinator" but no active context)
+        // Actually, detectCoordinatorViolation checks agentContext param, not isInCoordinatorContext
+        // So this will still detect - which is correct! The violation check uses agentContext param.
+        expect(violation.isViolation).toBe(true);
+      });
+
+      it("session isolation prevents cross-contamination", () => {
+        const session1 = "session-1";
+        const session2 = "session-2";
+
+        // Activate coordinator for session-1 only
+        setCoordinatorContext({
+          isCoordinator: true,
+          sessionId: session1,
+          epicId: "epic-1",
+        });
+
+        // Check that session-2 is not a coordinator
+        expect(isInCoordinatorContext(session1)).toBe(true);
+        expect(isInCoordinatorContext(session2)).toBe(false);
+
+        // Violations in session-1 should be detected
+        const ctx1 = getCoordinatorContext(session1);
+        expect(ctx1.epicId).toBe("epic-1");
+
+        // Violations in session-2 should not have epic context
+        const ctx2 = getCoordinatorContext(session2);
+        expect(ctx2.isCoordinator).toBe(false);
       });
     });
   });

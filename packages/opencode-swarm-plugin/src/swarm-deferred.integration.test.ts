@@ -8,12 +8,16 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { Effect, pipe } from "effect";
 import type { DatabaseAdapter } from "../../swarm-mail/src/types/database";
 import type { SwarmMailAdapter } from "../../swarm-mail/src/adapter";
+import type { HiveAdapter } from "../../swarm-mail/src/hive/adapter";
 import { createInMemorySwarmMailLibSQL } from "../../swarm-mail/src/libsql.convenience";
-import { DurableDeferredLive } from "../../swarm-mail/src/streams/effect/deferred";
+import { createHiveAdapter } from "../../swarm-mail/src/hive/adapter";
+import { beadsMigrationLibSQL, cellsViewMigrationLibSQL } from "../../swarm-mail/src/hive/migrations";
+import { DurableDeferred, DurableDeferredLive } from "../../swarm-mail/src/streams/effect/deferred";
 import { swarm_complete } from "./swarm-orchestrate";
 
 describe("swarm_complete DurableDeferred integration", () => {
   let swarmMail: SwarmMailAdapter;
+  let hive: HiveAdapter;
   let db: DatabaseAdapter;
   let projectKey: string;
 
@@ -23,11 +27,18 @@ describe("swarm_complete DurableDeferred integration", () => {
     db = await swarmMail.getDatabase();
     projectKey = "/tmp/test-deferred-integration";
 
+    // Run hive migrations to create beads tables
+    await db.exec(beadsMigrationLibSQL.up);
+    await db.exec(cellsViewMigrationLibSQL.up);
+
     // Register test agent using swarm-mail adapter
     await swarmMail.registerAgent(projectKey, "TestWorker");
 
-    // Create test bead using swarm-mail Hive adapter
-    await swarmMail.createCell(projectKey, {
+    // Create Hive adapter for cell management
+    hive = createHiveAdapter(db, projectKey);
+
+    // Create test cell using Hive adapter
+    await hive.createCell(projectKey, {
       title: "Test Task",
       type: "task",
       priority: 2,
@@ -41,14 +52,7 @@ describe("swarm_complete DurableDeferred integration", () => {
 
     // First create deferred (coordinator side)
     const createProgram = Effect.gen(function* () {
-      const DurableDeferred = yield* Effect.serviceOption(DurableDeferredLive);
-      expect(DurableDeferred._tag).toBe("Some");
-      
-      if (DurableDeferred._tag !== "Some") {
-        throw new Error("DurableDeferred service not available");
-      }
-
-      const service = DurableDeferred.value;
+      const service = yield* DurableDeferred;
       
       // Create deferred keyed by bead_id
       const handle = yield* service.create({
@@ -90,12 +94,7 @@ describe("swarm_complete DurableDeferred integration", () => {
     // TODO: Resolve the deferred in swarm_complete implementation
     // For now, manually resolve to verify await works
     const resolveProgram = Effect.gen(function* () {
-      const DurableDeferred = yield* Effect.serviceOption(DurableDeferredLive);
-      if (DurableDeferred._tag !== "Some") {
-        throw new Error("DurableDeferred service not available");
-      }
-
-      const service = DurableDeferred.value;
+      const service = yield* DurableDeferred;
       yield* service.resolve(deferredUrl, { completed: true }, db);
     });
 
@@ -105,12 +104,7 @@ describe("swarm_complete DurableDeferred integration", () => {
 
     // Coordinator awaits completion
     const awaitProgram = Effect.gen(function* () {
-      const DurableDeferred = yield* Effect.serviceOption(DurableDeferredLive);
-      if (DurableDeferred._tag !== "Some") {
-        throw new Error("DurableDeferred service not available");
-      }
-
-      const service = DurableDeferred.value;
+      const service = yield* DurableDeferred;
       const result = yield* service.await(deferredUrl, 60, db);
       
       expect(result).toEqual({ completed: true });
@@ -126,14 +120,7 @@ describe("swarm_complete DurableDeferred integration", () => {
 
   it("should timeout if deferred is never resolved", async () => {
     const program = Effect.gen(function* () {
-      const DurableDeferred = yield* Effect.serviceOption(DurableDeferredLive);
-      expect(DurableDeferred._tag).toBe("Some");
-      
-      if (DurableDeferred._tag !== "Some") {
-        throw new Error("DurableDeferred service not available");
-      }
-
-      const service = DurableDeferred.value;
+      const service = yield* DurableDeferred;
       
       // Create deferred with short timeout
       const handle = yield* service.create({

@@ -573,6 +573,74 @@ export const ContextInjectedEventSchema = BaseEventSchema.extend({
 });
 
 // ============================================================================
+// Coordinator Session Events (from eval-capture)
+// ============================================================================
+
+export const CoordinatorDecisionEventSchema = BaseEventSchema.extend({
+  type: z.literal("coordinator_decision"),
+  session_id: z.string(),
+  epic_id: z.string(),
+  event_type: z.literal("DECISION"),
+  decision_type: z.enum([
+    "strategy_selected",
+    "worker_spawned",
+    "review_completed",
+    "decomposition_complete",
+    "researcher_spawned",
+    "skill_loaded",
+    "inbox_checked",
+    "blocker_resolved",
+    "scope_change_approved",
+    "scope_change_rejected",
+  ]),
+  payload: z.any(),
+});
+
+export const CoordinatorViolationEventSchema = BaseEventSchema.extend({
+  type: z.literal("coordinator_violation"),
+  session_id: z.string(),
+  epic_id: z.string(),
+  event_type: z.literal("VIOLATION"),
+  violation_type: z.enum([
+    "coordinator_edited_file",
+    "coordinator_ran_tests",
+    "coordinator_reserved_files",
+    "no_worker_spawned",
+  ]),
+  payload: z.any(),
+});
+
+export const CoordinatorOutcomeEventSchema = BaseEventSchema.extend({
+  type: z.literal("coordinator_outcome"),
+  session_id: z.string(),
+  epic_id: z.string(),
+  event_type: z.literal("OUTCOME"),
+  outcome_type: z.enum([
+    "subtask_success",
+    "subtask_retry",
+    "subtask_failed",
+    "epic_complete",
+    "blocker_detected",
+  ]),
+  payload: z.any(),
+});
+
+export const CoordinatorCompactionEventSchema = BaseEventSchema.extend({
+  type: z.literal("coordinator_compaction"),
+  session_id: z.string(),
+  epic_id: z.string(),
+  event_type: z.literal("COMPACTION"),
+  compaction_type: z.enum([
+    "detection_complete",
+    "prompt_generated",
+    "context_injected",
+    "resumption_started",
+    "tool_call_tracked",
+  ]),
+  payload: z.any(),
+});
+
+// ============================================================================
 // Validation Events
 // ============================================================================
 
@@ -678,6 +746,11 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   CompactionTriggeredEventSchema,
   SwarmDetectedEventSchema,
   ContextInjectedEventSchema,
+  // Coordinator session events
+  CoordinatorDecisionEventSchema,
+  CoordinatorViolationEventSchema,
+  CoordinatorOutcomeEventSchema,
+  CoordinatorCompactionEventSchema,
   // Validation events
   ValidationStartedEventSchema,
   ValidationIssueEventSchema,
@@ -747,6 +820,11 @@ export type DecisionRecordedEvent = z.infer<typeof DecisionRecordedEventSchema>;
 export type CompactionTriggeredEvent = z.infer<typeof CompactionTriggeredEventSchema>;
 export type SwarmDetectedEvent = z.infer<typeof SwarmDetectedEventSchema>;
 export type ContextInjectedEvent = z.infer<typeof ContextInjectedEventSchema>;
+// Coordinator session event types
+export type CoordinatorDecisionEvent = z.infer<typeof CoordinatorDecisionEventSchema>;
+export type CoordinatorViolationEvent = z.infer<typeof CoordinatorViolationEventSchema>;
+export type CoordinatorOutcomeEvent = z.infer<typeof CoordinatorOutcomeEventSchema>;
+export type CoordinatorCompactionEvent = z.infer<typeof CoordinatorCompactionEventSchema>;
 
 // ============================================================================
 // Session State Types

@@ -209,6 +209,7 @@ const SwarmPlugin: Plugin = async (
      */
     "tool.execute.before": async (input, output) => {
       const toolName = input.tool;
+      const sessionId = input.sessionID || "unknown";
 
       // Check for planning anti-patterns
       if (shouldAnalyzeTool(toolName)) {
@@ -218,11 +219,29 @@ const SwarmPlugin: Plugin = async (
         }
       }
 
+      // Activate coordinator context when swarm tools are used
+      // MUST happen BEFORE violation check so violations can be detected
+      if (toolName === "hive_create_epic" || toolName === "swarm_decompose") {
+        setCoordinatorContext({
+          isCoordinator: true,
+          sessionId,
+        });
+      }
+
+      // Detect coordinator by Task tool spawning swarm-worker agent
+      if (toolName === "task" && input.agentName?.toLowerCase().includes("swarm")) {
+        setCoordinatorContext({
+          isCoordinator: true,
+          sessionId,
+        });
+      }
+
       // Check for coordinator violations when in coordinator context
-      if (isInCoordinatorContext()) {
-        const ctx = getCoordinatorContext();
+      // Uses session-scoped context detection
+      if (isInCoordinatorContext(sessionId)) {
+        const ctx = getCoordinatorContext(sessionId);
         const violation = detectCoordinatorViolation({
-          sessionId: input.sessionID || "unknown",
+          sessionId,
           epicId: ctx.epicId || "unknown",
           toolName,
           toolArgs: output.args as Record<string, unknown>,
@@ -232,14 +251,6 @@ const SwarmPlugin: Plugin = async (
         if (violation.isViolation) {
           console.warn(`[swarm-plugin] ${violation.message}`);
         }
-      }
-
-      // Activate coordinator context when swarm tools are used
-      if (toolName === "hive_create_epic" || toolName === "swarm_decompose") {
-        setCoordinatorContext({
-          isCoordinator: true,
-          sessionId: input.sessionID,
-        });
       }
 
       // Capture epic ID when epic is created
@@ -321,13 +332,14 @@ const SwarmPlugin: Plugin = async (
       }
 
       // Clear coordinator context when epic is closed
-      if (toolName === "hive_close" && output.output && isInCoordinatorContext()) {
-        const ctx = getCoordinatorContext();
+      const sessionId = input.sessionID || "unknown";
+      if (toolName === "hive_close" && output.output && isInCoordinatorContext(sessionId)) {
+        const ctx = getCoordinatorContext(sessionId);
         try {
           // Check if the closed cell is the active epic
           const result = JSON.parse(output.output);
           if (result.id === ctx.epicId) {
-            clearCoordinatorContext();
+            clearCoordinatorContext(sessionId);
           }
         } catch {
           // Parsing failed - ignore
@@ -337,6 +349,125 @@ const SwarmPlugin: Plugin = async (
       // Note: hive_sync should be called explicitly at session end
       // Auto-sync was removed because bd CLI is deprecated
       // The hive_sync tool handles flushing to JSONL and git commit/push
+
+      // ===== EVAL CAPTURE WIRING =====
+      // Wire orphaned capture functions to tool execution
+      // Pattern: dynamic import + try-catch + non-fatal (eval capture never blocks tool execution)
+
+      const ctx = getCoordinatorContext();
+      const epicId = ctx.epicId || "unknown";
+
+      // captureResearcherSpawned - Task tool with researcher subagent
+      if (toolName === "task" && input.agentName?.toLowerCase().includes("research")) {
+        try {
+          const { captureResearcherSpawned } = await import("./eval-capture.js");
+          const result = output.output ? JSON.parse(output.output) : {};
+          await captureResearcherSpawned({
+            session_id: input.sessionID,
+            epic_id: epicId,
+            researcher_id: result.researcher_id || "unknown",
+            research_topic: result.research_topic || input.prompt?.substring(0, 100) || "unknown",
+            tools_used: result.tools_used || [],
+          });
+        } catch (err) {
+          // Non-fatal - eval capture should never block tool execution
+          console.warn("[eval-capture] captureResearcherSpawned failed:", err);
+        }
+      }
+
+      // captureSkillLoaded - skills_use tool
+      if (toolName === "skills_use") {
+        try {
+          const { captureSkillLoaded } = await import("./eval-capture.js");
+          const skillName = input.name || "unknown";
+          const context = input.context;
+          await captureSkillLoaded({
+            session_id: input.sessionID,
+            epic_id: epicId,
+            skill_name: skillName,
+            context: context,
+          });
+        } catch (err) {
+          console.warn("[eval-capture] captureSkillLoaded failed:", err);
+        }
+      }
+
+      // captureInboxChecked - swarmmail_inbox tool
+      if (toolName === "swarmmail_inbox") {
+        try {
+          const { captureInboxChecked } = await import("./eval-capture.js");
+          const result = output.output ? JSON.parse(output.output) : {};
+          await captureInboxChecked({
+            session_id: input.sessionID,
+            epic_id: epicId,
+            message_count: result.message_count || 0,
+            urgent_count: result.urgent_count || 0,
+          });
+        } catch (err) {
+          console.warn("[eval-capture] captureInboxChecked failed:", err);
+        }
+      }
+
+      // captureBlockerResolved + captureBlockerDetected - hive_update tool
+      if (toolName === "hive_update") {
+        try {
+          const result = output.output ? JSON.parse(output.output) : {};
+          const newStatus = result.status || input.status;
+          const previousStatus = result.previous_status;
+
+          // captureBlockerResolved - status changed FROM blocked
+          if (previousStatus === "blocked" && newStatus !== "blocked") {
+            const { captureBlockerResolved } = await import("./eval-capture.js");
+            await captureBlockerResolved({
+              session_id: input.sessionID,
+              epic_id: epicId,
+              worker_id: result.worker_id || "unknown",
+              subtask_id: result.id || input.id || "unknown",
+              blocker_type: result.blocker_type || "unknown",
+              resolution: result.resolution || "Status changed to " + newStatus,
+            });
+          }
+
+          // captureBlockerDetected - status changed TO blocked
+          if (newStatus === "blocked" && previousStatus !== "blocked") {
+            const { captureBlockerDetected } = await import("./eval-capture.js");
+            await captureBlockerDetected({
+              session_id: input.sessionID,
+              epic_id: epicId,
+              worker_id: result.worker_id || "unknown",
+              subtask_id: result.id || input.id || "unknown",
+              blocker_type: result.blocker_type || "unknown",
+              blocker_description: result.blocker_description || result.description || "No description provided",
+            });
+          }
+        } catch (err) {
+          console.warn("[eval-capture] hive_update capture failed:", err);
+        }
+      }
+
+      // captureScopeChangeDecision - swarmmail_send with "Scope Change" in subject
+      if (toolName === "swarmmail_send" && input.subject?.includes("Scope Change")) {
+        try {
+          const { captureScopeChangeDecision } = await import("./eval-capture.js");
+          const result = output.output ? JSON.parse(output.output) : {};
+          const threadId = input.thread_id || epicId;
+          
+          await captureScopeChangeDecision({
+            session_id: input.sessionID,
+            epic_id: threadId,
+            worker_id: result.worker_id || "unknown",
+            subtask_id: result.subtask_id || "unknown",
+            approved: result.approved ?? false,
+            original_scope: result.original_scope,
+            new_scope: result.new_scope,
+            requested_scope: result.requested_scope,
+            rejection_reason: result.rejection_reason,
+            estimated_time_add: result.estimated_time_add,
+          });
+        } catch (err) {
+          console.warn("[eval-capture] captureScopeChangeDecision failed:", err);
+        }
+      }
     },
 
     /**

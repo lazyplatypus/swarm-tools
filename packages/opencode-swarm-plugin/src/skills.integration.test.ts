@@ -39,7 +39,7 @@ import {
 
 const TEST_RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const TEST_DIR = join(process.cwd(), `.test-skills-integration-${TEST_RUN_ID}`);
-const SKILLS_DIR = join(TEST_DIR, ".opencode", "skills");
+const SKILLS_DIR = join(TEST_DIR, ".opencode", "skill"); // Note: singular "skill" to match PROJECT_SKILL_DIRECTORIES
 
 function cleanupTestDir() {
   if (existsSync(TEST_DIR)) {

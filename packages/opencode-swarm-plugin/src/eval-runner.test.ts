@@ -2,16 +2,81 @@
  * Tests for eval-runner - Programmatic evalite execution
  *
  * TDD: These tests MUST fail initially, then pass after implementation.
+ * 
+ * UNIT TESTS: Mock evalite to test runEvals logic in isolation.
+ * Integration tests should verify actual evalite integration.
  */
 
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, afterEach, mock } from "bun:test";
 import { runEvals } from "./eval-runner";
 import path from "node:path";
 import fs from "node:fs";
 import { getEvalHistoryPath } from "./eval-history";
 
+// Mock evalite/runner to avoid external dependency in unit tests
+mock.module("evalite/runner", () => ({
+  runEvalite: mock(async (options: any) => {
+    // Simulate evalite writing results to outputPath
+    const mockResults = {
+      evals: [
+        {
+          name: "example",
+          filepath: "/mock/path/example.eval.ts",
+          status: "success" as const,
+          duration: 100,
+          averageScore: 0.95,
+          results: [
+            {
+              input: { test: "input" },
+              output: "test output",
+              expected: "test output",
+              scores: [
+                { name: "accuracy", score: 0.95, description: "Test accuracy" }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    // Write mock results to output path
+    if (options.outputPath) {
+      await Bun.write(options.outputPath, JSON.stringify(mockResults));
+    }
+  })
+}));
+
+mock.module("evalite/in-memory-storage", () => ({
+  createInMemoryStorage: mock(() => ({}))
+}));
+
 // Use project root for all tests
 const PROJECT_ROOT = path.resolve(import.meta.dir, "..");
+const EVALS_DIR = path.join(PROJECT_ROOT, "evals");
+
+// Create temporary evals directory for tests
+beforeAll(() => {
+  if (!fs.existsSync(EVALS_DIR)) {
+    fs.mkdirSync(EVALS_DIR, { recursive: true });
+  }
+  
+  // Create mock eval files
+  fs.writeFileSync(
+    path.join(EVALS_DIR, "example.eval.ts"),
+    'import { evalite } from "evalite";\nevalite("example", { data: [], task: async () => {}, scorers: [] });'
+  );
+  fs.writeFileSync(
+    path.join(EVALS_DIR, "coordinator.eval.ts"),
+    'import { evalite } from "evalite";\nevalite("coordinator", { data: [], task: async () => {}, scorers: [] });'
+  );
+});
+
+// Clean up after all tests
+afterAll(() => {
+  if (fs.existsSync(EVALS_DIR)) {
+    fs.rmSync(EVALS_DIR, { recursive: true, force: true });
+  }
+});
 
 describe("runEvals", () => {
   test("runs all evals when no suite filter provided", async () => {

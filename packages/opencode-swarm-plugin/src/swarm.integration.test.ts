@@ -1385,8 +1385,8 @@ describe("swarm_init", () => {
 
 describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
   describe("formatSubtaskPromptV2", () => {
-    it("generates correct prompt with all fields", () => {
-      const result = formatSubtaskPromptV2({
+    it("generates correct prompt with all fields", async () => {
+      const result = await formatSubtaskPromptV2({
         bead_id: "test-swarm-plugin-lf2p4u-oauth123.1",
         epic_id: "test-swarm-plugin-lf2p4u-oauth123",
         subtask_title: "Add OAuth provider",
@@ -1413,8 +1413,8 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
       expect(result).toContain("test-swarm-plugin-lf2p4u-oauth123");
     });
 
-    it("handles missing optional fields", () => {
-      const result = formatSubtaskPromptV2({
+    it("handles missing optional fields", async () => {
+      const result = await formatSubtaskPromptV2({
         bead_id: "test-swarm-plugin-lf2p4u-simple456.1",
         epic_id: "test-swarm-plugin-lf2p4u-simple456",
         subtask_title: "Simple task",
@@ -1435,8 +1435,8 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
       expect(result).toContain("(none)");
     });
 
-    it("handles files with special characters", () => {
-      const result = formatSubtaskPromptV2({
+    it("handles files with special characters", async () => {
+      const result = await formatSubtaskPromptV2({
         bead_id: "test-swarm-plugin-lf2p4u-paths789.1",
         epic_id: "test-swarm-plugin-lf2p4u-paths789",
         subtask_title: "Handle paths",
@@ -2255,7 +2255,7 @@ describe("Contract Validation", () => {
 
     it("handles project_key with slashes correctly", async () => {
       // Verify that project_key like "/Users/joel/Code/project" works
-      const testProjectPath = "/a/b/c/test-" + Date.now();
+      const testProjectPath = "/tmp/nested/path/test-" + Date.now();
       const { getHiveAdapter } = await import("./hive");
       const adapter = await getHiveAdapter(testProjectPath);
       

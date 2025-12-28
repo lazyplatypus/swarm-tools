@@ -1,8 +1,8 @@
 /**
  * Eval Data Capture - Captures real swarm execution data for evals
  *
- * Records decomposition inputs, outputs, and outcomes to JSONL files
- * that can be used as ground truth for Evalite evals.
+ * Records decomposition inputs, outputs, and outcomes to libSQL via appendEvent.
+ * Events are queryable via observability-tools.ts for stats/history.
  *
  * Data flow:
  * 1. swarm_decompose captures: task, context, generated decomposition
@@ -10,11 +10,11 @@
  * 3. swarm_record_outcome captures: learning signals
  * 4. Human feedback (optional): accept/reject/modify
  * 5. Coordinator events: decisions, violations, outcomes, compaction
- * 6. Session capture: full coordinator session to ~/.config/swarm-tools/sessions/
+ * 6. Session capture: coordinator session events to libSQL events table
  *
- * Event types:
+ * Event types (stored as coordinator_decision, coordinator_violation, etc.):
  * - DECISION: strategy_selected, worker_spawned, review_completed, decomposition_complete, researcher_spawned, skill_loaded, inbox_checked, blocker_resolved, scope_change_approved, scope_change_rejected
- * - VIOLATION: coordinator_edited_file, coordinator_ran_tests, coordinator_reserved_files, no_worker_spawned
+ * - VIOLATION: coordinator_edited_file, coordinator_ran_tests, coordinator_reserved_files, no_worker_spawned, worker_completed_without_review
  * - OUTCOME: subtask_success, subtask_retry, subtask_failed, epic_complete, blocker_detected
  * - COMPACTION: detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked
  *
@@ -24,6 +24,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { z } from "zod";
+import { getSwarmMailLibSQL } from "swarm-mail";
 
 // ============================================================================
 // Schemas
@@ -163,6 +164,7 @@ export const CoordinatorEventSchema = z.discriminatedUnion("event_type", [
       "coordinator_ran_tests",
       "coordinator_reserved_files",
       "no_worker_spawned",
+      "worker_completed_without_review",
     ]),
     payload: z.any(),
   }),
@@ -583,9 +585,10 @@ export function getEvalDataStats(projectPath: string): {
 
 /**
  * Get the session directory path
+ * Can be overridden via SWARM_SESSIONS_DIR env var for testing
  */
 export function getSessionDir(): string {
-  return path.join(os.homedir(), ".config", "swarm-tools", "sessions");
+  return process.env.SWARM_SESSIONS_DIR || path.join(os.homedir(), ".config", "swarm-tools", "sessions");
 }
 
 /**
@@ -606,21 +609,71 @@ export function ensureSessionDir(): void {
 }
 
 /**
- * Capture a coordinator event to the session file
+ * Capture a coordinator event to libSQL via appendEvent
  *
- * Appends the event as a JSONL line to ~/.config/swarm-tools/sessions/{session_id}.jsonl
+ * Stores event in events table with type based on event_type:
+ * - DECISION → coordinator_decision
+ * - VIOLATION → coordinator_violation
+ * - OUTCOME → coordinator_outcome
+ * - COMPACTION → coordinator_compaction
+ *
+ * The project_key is derived from the session working directory (process.cwd()).
+ * Events are queryable via observability-tools.ts.
  */
-export function captureCoordinatorEvent(event: CoordinatorEvent): void {
+export async function captureCoordinatorEvent(event: CoordinatorEvent): Promise<void> {
   // Validate event
   CoordinatorEventSchema.parse(event);
 
-  // Ensure directory exists
-  ensureSessionDir();
+  try {
+    const projectPath = process.cwd();
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
 
-  // Append to session file
-  const sessionPath = getSessionPath(event.session_id);
-  const line = `${JSON.stringify(event)}\n`;
-  fs.appendFileSync(sessionPath, line, "utf-8");
+    // Map CoordinatorEvent type to AgentEvent type
+    const eventType = `coordinator_${event.event_type.toLowerCase()}` as 
+      | "coordinator_decision" 
+      | "coordinator_violation" 
+      | "coordinator_outcome" 
+      | "coordinator_compaction";
+
+    // Build the event payload - include all original fields
+    const eventData: Record<string, any> = {
+      type: eventType,
+      project_key: projectPath,
+      timestamp: new Date(event.timestamp).getTime(),
+      session_id: event.session_id,
+      epic_id: event.epic_id,
+      event_type: event.event_type,
+      payload: event.payload,
+    };
+
+    // Add decision_type, violation_type, outcome_type, or compaction_type
+    if (event.event_type === "DECISION") {
+      eventData.decision_type = (event as any).decision_type;
+    } else if (event.event_type === "VIOLATION") {
+      eventData.violation_type = (event as any).violation_type;
+    } else if (event.event_type === "OUTCOME") {
+      eventData.outcome_type = (event as any).outcome_type;
+    } else if (event.event_type === "COMPACTION") {
+      eventData.compaction_type = (event as any).compaction_type;
+    }
+
+    // Append to libSQL events table
+    await swarmMail.appendEvent(eventData as any);
+
+    // LEGACY: Also write to JSONL for backward compatibility during transition
+    // TODO: Remove after migration to libSQL is complete
+    ensureSessionDir();
+    const sessionPath = getSessionPath(event.session_id);
+    const line = `${JSON.stringify(event)}\n`;
+    fs.appendFileSync(sessionPath, line, "utf-8");
+  } catch (error) {
+    // Fallback to JSONL-only if libSQL fails (e.g., during tests)
+    console.warn("Failed to append event to libSQL, using JSONL fallback:", error);
+    ensureSessionDir();
+    const sessionPath = getSessionPath(event.session_id);
+    const line = `${JSON.stringify(event)}\n`;
+    fs.appendFileSync(sessionPath, line, "utf-8");
+  }
 }
 
 /**
@@ -671,7 +724,7 @@ export function captureCoordinatorEvent(event: CoordinatorEvent): void {
  *   },
  * });
  */
-export function captureCompactionEvent(params: {
+export async function captureCompactionEvent(params: {
   session_id: string;
   epic_id: string;
   compaction_type:
@@ -681,7 +734,7 @@ export function captureCompactionEvent(params: {
     | "resumption_started"
     | "tool_call_tracked";
   payload: any;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -691,7 +744,7 @@ export function captureCompactionEvent(params: {
     payload: params.payload,
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -700,13 +753,13 @@ export function captureCompactionEvent(params: {
  * Called when coordinator spawns a swarm-researcher to handle unfamiliar technology
  * or gather documentation before decomposition.
  */
-export function captureResearcherSpawned(params: {
+export async function captureResearcherSpawned(params: {
   session_id: string;
   epic_id: string;
   researcher_id: string;
   research_topic: string;
   tools_used?: string[];
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -720,7 +773,7 @@ export function captureResearcherSpawned(params: {
     },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -728,12 +781,12 @@ export function captureResearcherSpawned(params: {
  *
  * Called when coordinator loads domain knowledge via skills_use().
  */
-export function captureSkillLoaded(params: {
+export async function captureSkillLoaded(params: {
   session_id: string;
   epic_id: string;
   skill_name: string;
   context?: string;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -746,7 +799,7 @@ export function captureSkillLoaded(params: {
     },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -755,12 +808,12 @@ export function captureSkillLoaded(params: {
  * Called when coordinator checks swarmmail inbox for worker messages.
  * Tracks monitoring frequency and responsiveness.
  */
-export function captureInboxChecked(params: {
+export async function captureInboxChecked(params: {
   session_id: string;
   epic_id: string;
   message_count: number;
   urgent_count: number;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -773,7 +826,7 @@ export function captureInboxChecked(params: {
     },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -781,14 +834,14 @@ export function captureInboxChecked(params: {
  *
  * Called when coordinator successfully unblocks a worker.
  */
-export function captureBlockerResolved(params: {
+export async function captureBlockerResolved(params: {
   session_id: string;
   epic_id: string;
   worker_id: string;
   subtask_id: string;
   blocker_type: string;
   resolution: string;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -803,7 +856,7 @@ export function captureBlockerResolved(params: {
     },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -811,7 +864,7 @@ export function captureBlockerResolved(params: {
  *
  * Called when coordinator approves or rejects a worker's scope expansion request.
  */
-export function captureScopeChangeDecision(params: {
+export async function captureScopeChangeDecision(params: {
   session_id: string;
   epic_id: string;
   worker_id: string;
@@ -822,7 +875,7 @@ export function captureScopeChangeDecision(params: {
   requested_scope?: string;
   rejection_reason?: string;
   estimated_time_add?: number;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -845,7 +898,7 @@ export function captureScopeChangeDecision(params: {
         },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**
@@ -853,14 +906,14 @@ export function captureScopeChangeDecision(params: {
  *
  * Called when a worker reports being blocked (OUTCOME event, not DECISION).
  */
-export function captureBlockerDetected(params: {
+export async function captureBlockerDetected(params: {
   session_id: string;
   epic_id: string;
   worker_id: string;
   subtask_id: string;
   blocker_type: string;
   blocker_description: string;
-}): void {
+}): Promise<void> {
   const event: CoordinatorEvent = {
     session_id: params.session_id,
     epic_id: params.epic_id,
@@ -876,7 +929,7 @@ export function captureBlockerDetected(params: {
     },
   };
 
-  captureCoordinatorEvent(event);
+  await captureCoordinatorEvent(event);
 }
 
 /**

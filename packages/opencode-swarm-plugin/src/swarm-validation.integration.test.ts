@@ -11,12 +11,14 @@ import type { SwarmMailAdapter } from "swarm-mail";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { clearHiveAdapterCache } from "./hive";
 
 describe("Swarm Validation Integration", () => {
   let swarmMail: SwarmMailAdapter;
   let testProjectKey: string;
 
   beforeEach(async () => {
+    clearHiveAdapterCache();
     swarmMail = await createInMemorySwarmMail("swarm-validation-test");
     // Create a real temporary directory for the test
     testProjectKey = mkdtempSync(join(tmpdir(), "swarm-validation-test-"));
@@ -24,6 +26,7 @@ describe("Swarm Validation Integration", () => {
 
   afterEach(async () => {
     await swarmMail.close();
+    clearHiveAdapterCache();
     // Clean up temp directory
     try {
       rmSync(testProjectKey, { recursive: true, force: true });

@@ -41,6 +41,7 @@ import {
 } from "./compaction-observability";
 import { getHiveAdapter, getHiveWorkingDirectory } from "./hive";
 import { createChildLogger } from "./logger";
+import { captureCompactionEvent } from "./eval-capture";
 
 let _logger: any | undefined;
 
@@ -1073,6 +1074,20 @@ export function createCompactionHook(client?: OpencodeClient) {
         detected: detection.detected || scannedState.epicId !== undefined,
       });
 
+      // Capture detection_complete event
+      const epicId = scannedState.epicId || detection.state?.epicId || "unknown";
+      await captureCompactionEvent({
+        session_id: input.sessionID,
+        epic_id: epicId,
+        compaction_type: "detection_complete",
+        payload: {
+          confidence: effectiveConfidence,
+          detected: detection.detected || scannedState.epicId !== undefined,
+          reasons: detection.reasons,
+          context_type: effectiveConfidence === "high" || effectiveConfidence === "medium" ? "full" : "fallback",
+        },
+      });
+
       recordPhaseStart(metrics, CompactionPhase.INJECT);
       if (
         effectiveConfidence === "high" ||
@@ -1106,6 +1121,19 @@ export function createCompactionHook(client?: OpencodeClient) {
           context_type: "full",
         });
 
+        // Capture prompt_generated event with FULL prompt content (for eval scoring)
+        await captureCompactionEvent({
+          session_id: input.sessionID,
+          epic_id: epicId,
+          compaction_type: "prompt_generated",
+          payload: {
+            prompt_length: contextContent.length,
+            full_prompt: contextContent, // FULL content, not truncated - used for quality scoring
+            context_type: "full",
+            confidence: effectiveConfidence,
+          },
+        });
+
         getLog().info(
           {
             confidence: effectiveConfidence,
@@ -1128,6 +1156,19 @@ export function createCompactionHook(client?: OpencodeClient) {
         recordPhaseComplete(metrics, CompactionPhase.INJECT, {
           context_length: contextContent.length,
           context_type: "fallback",
+        });
+
+        // Capture prompt_generated event for fallback prompt
+        await captureCompactionEvent({
+          session_id: input.sessionID,
+          epic_id: epicId,
+          compaction_type: "prompt_generated",
+          payload: {
+            prompt_length: contextContent.length,
+            full_prompt: contextContent,
+            context_type: "fallback",
+            confidence: effectiveConfidence,
+          },
         });
 
         getLog().info(

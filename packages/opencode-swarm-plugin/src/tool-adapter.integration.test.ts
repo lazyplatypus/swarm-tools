@@ -43,6 +43,7 @@ import {
 } from "./swarm-mail";
 
 import {
+  clearHiveAdapterCache,
   getHiveWorkingDirectory,
   hive_close,
   hive_create,
@@ -137,8 +138,9 @@ beforeEach(async () => {
   // Create directory for test database (tools will create DB here)
   await mkdir(TEST_DB_PATH, { recursive: true });
   
-  // Clear adapter cache to ensure clean state
+  // Clear adapter caches to ensure clean state
   clearAdapterCache();
+  clearHiveAdapterCache();
   
   // Don't create SwarmMail here - let tools create it
   // This ensures tests use the SAME DB adapter as tools
@@ -153,6 +155,7 @@ afterEach(async () => {
   
   // Clear all cached adapters
   clearAdapterCache();
+  clearHiveAdapterCache();
   
   // Clean up all test database directories
   for (const path of testPaths) {

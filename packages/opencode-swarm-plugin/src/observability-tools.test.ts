@@ -24,7 +24,7 @@ import {
 
 describe("observability-tools", () => {
 	let swarmMail: SwarmMailAdapter;
-	const projectPath = "/test/project";
+	const projectPath = "/tmp/test-observability-" + Date.now();
 	const mockContext: ToolContext = { sessionID: "test-session" };
 
 	beforeAll(async () => {

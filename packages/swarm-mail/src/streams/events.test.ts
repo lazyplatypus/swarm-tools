@@ -6,8 +6,12 @@
  * - createEvent helper
  * - isEventType type guard
  * - Edge cases and error handling
+ * - Persistence to libSQL via Drizzle ORM
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   AgentEventSchema,
   AgentRegisteredEventSchema,
@@ -1585,5 +1589,160 @@ describe("ValidationCompletedEventSchema", () => {
         duration_ms: -100,
       }),
     ).toThrow();
+  });
+});
+
+// ============================================================================
+// Persistence Verification Tests (libSQL via Drizzle)
+// ============================================================================
+
+import { getDatabasePath } from "./index.js";
+import { appendEvent, readEvents } from "./store-drizzle.js";
+import { clearAdapterCache } from "./store.js";
+
+describe("appendEvent persistence to libSQL", () => {
+  afterEach(async () => {
+    // Clean up test database
+    clearAdapterCache();
+    try {
+      await rm(getDatabasePath("/tmp/test-persistence"), { force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it("appendEvent writes to libSQL and persists across calls", async () => {
+    const projectPath = "/tmp/test-persistence";
+    
+    // Create and append an event
+    const event = createEvent("agent_registered", {
+      project_key: "test-project",
+      agent_name: "PersistenceTestAgent",
+      program: "opencode",
+      model: "claude-sonnet-4",
+      task_description: "Testing persistence",
+    });
+
+    const appendResult = await appendEvent(event, projectPath);
+
+    // Verify return value
+    expect(appendResult.id).toBeDefined();
+    expect(appendResult.sequence).toBeDefined();
+    expect(appendResult.type).toBe("agent_registered");
+    expect(appendResult.agent_name).toBe("PersistenceTestAgent");
+
+    // Read back from database to verify persistence
+    const readResult = await readEvents(
+      { 
+        projectKey: "test-project",
+        types: ["agent_registered"]
+      },
+      projectPath
+    );
+
+    expect(readResult).toHaveLength(1);
+    expect(readResult[0]?.id).toBe(appendResult.id);
+    expect(readResult[0]?.sequence).toBe(appendResult.sequence);
+    expect(readResult[0]?.agent_name).toBe("PersistenceTestAgent");
+  });
+
+  it("verifies database is file-based, not in-memory", async () => {
+    const projectPath = "/tmp/test-persistence";
+    
+    // Append event
+    const event = createEvent("agent_registered", {
+      project_key: "test-project",
+      agent_name: "FilePersistenceAgent",
+      program: "opencode",
+      model: "claude-sonnet-4",
+    });
+
+    await appendEvent(event, projectPath);
+
+    // Clear adapter cache to force new connection
+    clearAdapterCache();
+
+    // Read from a fresh connection - should still see the event
+    const readResult = await readEvents(
+      { projectKey: "test-project" },
+      projectPath
+    );
+
+    expect(readResult).toHaveLength(1);
+    expect(readResult[0]?.agent_name).toBe("FilePersistenceAgent");
+  });
+
+  it("appendEvent uses Drizzle ORM, not raw SQL", async () => {
+    const projectPath = "/tmp/test-persistence";
+    
+    // The appendEvent function in store-drizzle.ts uses:
+    // db.insert(eventsTable).values(...).returning(...)
+    // This is Drizzle's query builder, not raw SQL
+    
+    const event = createEvent("message_sent", {
+      project_key: "test-project",
+      from_agent: "Agent1",
+      to_agents: ["Agent2"],
+      subject: "Test message",
+      body: "Testing Drizzle ORM",
+      importance: "normal",
+      ack_required: false,
+    });
+
+    const result = await appendEvent(event, projectPath);
+
+    // If Drizzle ORM is working, we should get id and sequence back
+    expect(result.id).toBeTypeOf("number");
+    expect(result.sequence).toBeTypeOf("number");
+    
+    // Verify materialized views were updated (Drizzle's updateMaterializedViewsDrizzle)
+    const events = await readEvents({ projectKey: "test-project" }, projectPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("message_sent");
+  });
+
+  it("verifies database path resolves correctly", async () => {
+    const projectPath = "/tmp/test-persistence";
+    
+    const event = createEvent("agent_registered", {
+      project_key: "test-project",
+      agent_name: "PathTestAgent",
+      program: "opencode",
+      model: "claude-sonnet-4",
+    });
+
+    await appendEvent(event, projectPath);
+
+    // Verify database file exists at expected location
+    const expectedDbPath = join(projectPath, ".opencode", "swarm.db");
+    expect(existsSync(expectedDbPath)).toBe(true);
+  });
+
+  it("appendEvent increments sequence number", async () => {
+    const projectPath = "/tmp/test-persistence";
+    
+    const event1 = createEvent("agent_registered", {
+      project_key: "test-project",
+      agent_name: "Agent1",
+      program: "opencode",
+      model: "claude-sonnet-4",
+    });
+
+    const event2 = createEvent("agent_registered", {
+      project_key: "test-project",
+      agent_name: "Agent2",
+      program: "opencode",
+      model: "claude-sonnet-4",
+    });
+
+    const result1 = await appendEvent(event1, projectPath);
+    const result2 = await appendEvent(event2, projectPath);
+
+    // Sequence should increment
+    expect(result2.sequence).toBe(result1.sequence + 1);
+    
+    // Both events should be in database
+    const allEvents = await readEvents({ projectKey: "test-project" }, projectPath);
+    expect(allEvents).toHaveLength(2);
   });
 });

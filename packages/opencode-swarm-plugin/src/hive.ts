@@ -527,6 +527,16 @@ export async function getHiveAdapter(projectKey: string): Promise<HiveAdapter> {
 export const getBeadsAdapter = getHiveAdapter;
 
 /**
+ * Clear the hive adapter cache
+ * 
+ * Used in tests to ensure clean state between test runs.
+ * Clears all cached adapters without closing them (caller should close first).
+ */
+export function clearHiveAdapterCache(): void {
+  adapterCache.clear();
+}
+
+/**
  * Auto-migrate cells from .hive/issues.jsonl if:
  * 1. The JSONL file exists
  * 2. The database has no cells for this project

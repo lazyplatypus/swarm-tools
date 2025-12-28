@@ -65,3 +65,19 @@ export {
 	type SessionStats,
 	type StalenessResult,
 } from "./session-indexer.js";
+
+// Session quality (ghost session detection)
+export {
+	isQualitySession,
+	purgeGhostSessions,
+	type SessionQualityCriteria,
+	type PurgeResult,
+} from "./session-quality.js";
+
+// Session store (indexing with quality filtering)
+export {
+	SessionStore,
+	type IndexWithFilteringOptions,
+	type FilteredIndexResult,
+	type SessionQueryOptions,
+} from "./session-store.js";

@@ -1,10 +1,13 @@
 /**
  * Tests for eval-capture coordinator event schemas and session capture
  */
-import { type Mock, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { type Mock, afterEach, beforeAll, afterAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { join } from "node:path";
 import {
   type CoordinatorEvent,
   CoordinatorEventSchema,
@@ -378,21 +381,34 @@ describe("CoordinatorSession schema", () => {
 describe("captureCoordinatorEvent", () => {
   let sessionDir: string;
   let sessionId: string;
+  let testDir: string;
+  let testCounter = 0;
+
+  beforeAll(() => {
+    // Create isolated temp directory for this test suite
+    testDir = mkdtempSync(join(tmpdir(), "swarm-test-capture-"));
+    sessionDir = join(testDir, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    // Clean up entire temp directory
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
-    sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-    sessionId = `test-${Date.now()}`;
+    sessionId = `test-${Date.now()}-${testCounter++}`;
+    
+    // Mock the sessions directory path for captureCoordinatorEvent
+    // This requires the function to accept a configurable path or use an env var
+    process.env.SWARM_SESSIONS_DIR = sessionDir;
   });
 
   afterEach(() => {
-    // Clean up test session file
-    const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-    }
+    delete process.env.SWARM_SESSIONS_DIR;
   });
 
-  test("creates session directory if not exists", () => {
+  test("creates session directory if not exists", async () => {
     const event: CoordinatorEvent = {
       session_id: sessionId,
       epic_id: "bd-123",
@@ -402,12 +418,12 @@ describe("captureCoordinatorEvent", () => {
       payload: { strategy: "file-based" },
     };
 
-    captureCoordinatorEvent(event);
+    await captureCoordinatorEvent(event);
 
     expect(fs.existsSync(sessionDir)).toBe(true);
   });
 
-  test("appends event to session file", () => {
+  test("appends event to session file", async () => {
     const event: CoordinatorEvent = {
       session_id: sessionId,
       epic_id: "bd-123",
@@ -417,7 +433,7 @@ describe("captureCoordinatorEvent", () => {
       payload: { strategy: "file-based" },
     };
 
-    captureCoordinatorEvent(event);
+    await captureCoordinatorEvent(event);
 
     const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
     expect(fs.existsSync(sessionPath)).toBe(true);
@@ -431,7 +447,7 @@ describe("captureCoordinatorEvent", () => {
     expect(parsed.event_type).toBe("DECISION");
   });
 
-  test("appends multiple events to same session", () => {
+  test("appends multiple events to same session", async () => {
     const event1: CoordinatorEvent = {
       session_id: sessionId,
       epic_id: "bd-123",
@@ -450,8 +466,8 @@ describe("captureCoordinatorEvent", () => {
       payload: { file: "src/bad.ts" },
     };
 
-    captureCoordinatorEvent(event1);
-    captureCoordinatorEvent(event2);
+    await captureCoordinatorEvent(event1);
+    await captureCoordinatorEvent(event2);
 
     const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
     const content = fs.readFileSync(sessionPath, "utf-8");
@@ -584,21 +600,29 @@ describe("COMPACTION events", () => {
 describe("saveSession", () => {
   let sessionDir: string;
   let sessionId: string;
+  let testDir: string;
+  let testCounter = 0;
+
+  beforeAll(() => {
+    testDir = mkdtempSync(join(tmpdir(), "swarm-test-save-"));
+    sessionDir = join(testDir, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
-    sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-    sessionId = `test-${Date.now()}`;
+    sessionId = `test-${Date.now()}-${testCounter++}`;
+    process.env.SWARM_SESSIONS_DIR = sessionDir;
   });
 
   afterEach(() => {
-    // Clean up test session file
-    const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-    }
+    delete process.env.SWARM_SESSIONS_DIR;
   });
 
-  test("wraps events in session structure", () => {
+  test("wraps events in session structure", async () => {
     // Capture some events
     const event1: CoordinatorEvent = {
       session_id: sessionId,
@@ -609,7 +633,7 @@ describe("saveSession", () => {
       payload: { strategy: "file-based" },
     };
 
-    captureCoordinatorEvent(event1);
+    await captureCoordinatorEvent(event1);
 
     // Save session
     const session = saveSession({
@@ -637,21 +661,29 @@ describe("saveSession", () => {
 describe("session_id propagation from ctx.sessionID", () => {
   let sessionDir: string;
   let sessionId: string;
+  let testDir: string;
+  let testCounter = 0;
+
+  beforeAll(() => {
+    testDir = mkdtempSync(join(tmpdir(), "swarm-test-ctx-"));
+    sessionDir = join(testDir, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
-    sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-    sessionId = `test-ctx-${Date.now()}`;
+    sessionId = `test-ctx-${Date.now()}-${testCounter++}`;
+    process.env.SWARM_SESSIONS_DIR = sessionDir;
   });
 
   afterEach(() => {
-    // Clean up test session file
-    const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-    }
+    delete process.env.SWARM_SESSIONS_DIR;
   });
 
-  test("session_id should come from ctx.sessionID, not process.env", () => {
+  test("session_id should come from ctx.sessionID, not process.env", async () => {
     // GIVEN: process.env.OPENCODE_SESSION_ID is empty (mimics real scenario)
     const oldEnv = process.env.OPENCODE_SESSION_ID;
     delete process.env.OPENCODE_SESSION_ID;
@@ -667,7 +699,7 @@ describe("session_id propagation from ctx.sessionID", () => {
         payload: { strategy: "file-based" },
       };
 
-      captureCoordinatorEvent(event);
+      await captureCoordinatorEvent(event);
 
       // THEN: Event should be captured with correct session_id
       const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
@@ -685,7 +717,7 @@ describe("session_id propagation from ctx.sessionID", () => {
     }
   });
 
-  test("demonstrates call sites must pass ctx.sessionID not process.env", () => {
+  test("demonstrates call sites must pass ctx.sessionID not process.env", async () => {
     // GIVEN: This simulates what happens in real call sites
     const oldEnv = process.env.OPENCODE_SESSION_ID;
     delete process.env.OPENCODE_SESSION_ID; // Empty in real OpenCode environment
@@ -702,7 +734,7 @@ describe("session_id propagation from ctx.sessionID", () => {
         payload: { strategy: "file-based" },
       };
 
-      captureCoordinatorEvent(badEvent);
+      await captureCoordinatorEvent(badEvent);
 
       // THEN: Event goes to unknown.jsonl (BAD!)
       const unknownPath = path.join(sessionDir, "unknown.jsonl");
@@ -718,7 +750,7 @@ describe("session_id propagation from ctx.sessionID", () => {
         payload: { strategy: "file-based" },
       };
 
-      captureCoordinatorEvent(goodEvent);
+      await captureCoordinatorEvent(goodEvent);
 
       // THEN: Event goes to correct session file
       const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
@@ -730,7 +762,7 @@ describe("session_id propagation from ctx.sessionID", () => {
     }
   });
 
-  test("verifies all call sites now use ctx.sessionID", () => {
+  test("verifies all call sites now use ctx.sessionID", async () => {
     // This test documents that we've fixed all call sites to use ctx.sessionID
     // instead of process.env.OPENCODE_SESSION_ID
     
@@ -758,7 +790,7 @@ describe("session_id propagation from ctx.sessionID", () => {
         payload: { bead_id: "bd-456.1" },
       };
 
-      captureCoordinatorEvent(event);
+      await captureCoordinatorEvent(event);
 
       // Verify event captured with correct session_id
       const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
@@ -778,22 +810,30 @@ describe("session_id propagation from ctx.sessionID", () => {
 describe("captureCompactionEvent", () => {
   let sessionDir: string;
   let sessionId: string;
+  let testDir: string;
+  let testCounter = 0;
+
+  beforeAll(() => {
+    testDir = mkdtempSync(join(tmpdir(), "swarm-test-compaction-"));
+    sessionDir = join(testDir, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
-    sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-    sessionId = `test-compaction-${Date.now()}`;
+    sessionId = `test-compaction-${Date.now()}-${testCounter++}`;
+    process.env.SWARM_SESSIONS_DIR = sessionDir;
   });
 
   afterEach(() => {
-    // Clean up test session file
-    const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-    }
+    delete process.env.SWARM_SESSIONS_DIR;
   });
 
-  test("writes detection_complete event to session file", () => {
-    captureCompactionEvent({
+  test("writes detection_complete event to session file", async () => {
+    await captureCompactionEvent({
       session_id: sessionId,
       epic_id: "bd-123",
       compaction_type: "detection_complete",
@@ -817,10 +857,10 @@ describe("captureCompactionEvent", () => {
     expect(parsed.payload.confidence).toBe("high");
   });
 
-  test("writes prompt_generated event with full prompt content", () => {
+  test("writes prompt_generated event with full prompt content", async () => {
     const fullPrompt = "You are a coordinator agent. ".repeat(200); // ~6k chars
     
-    captureCompactionEvent({
+    await captureCompactionEvent({
       session_id: sessionId,
       epic_id: "bd-123",
       compaction_type: "prompt_generated",
@@ -833,21 +873,22 @@ describe("captureCompactionEvent", () => {
 
     const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
     const content = fs.readFileSync(sessionPath, "utf-8");
-    const parsed = JSON.parse(content.trim());
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[0]);
 
     expect(parsed.payload.full_prompt).toBe(fullPrompt);
     expect(parsed.payload.full_prompt.length).toBe(fullPrompt.length);
   });
 
-  test("appends multiple compaction events to same session", () => {
-    captureCompactionEvent({
+  test("appends multiple compaction events to same session", async () => {
+    await captureCompactionEvent({
       session_id: sessionId,
       epic_id: "bd-123",
       compaction_type: "detection_complete",
       payload: { confidence: "high" },
     });
 
-    captureCompactionEvent({
+    await captureCompactionEvent({
       session_id: sessionId,
       epic_id: "bd-123",
       compaction_type: "prompt_generated",
@@ -866,7 +907,7 @@ describe("captureCompactionEvent", () => {
     expect(event2.compaction_type).toBe("prompt_generated");
   });
 
-  test("full compaction lifecycle tracking", () => {
+  test("full compaction lifecycle tracking", async () => {
     // Simulate full compaction hook lifecycle
     const lifecycleEvents = [
       {
@@ -911,7 +952,7 @@ describe("captureCompactionEvent", () => {
 
     // Capture all lifecycle events
     for (const event of lifecycleEvents) {
-      captureCompactionEvent({
+      await captureCompactionEvent({
         session_id: sessionId,
         epic_id: "bd-123",
         ...event,
@@ -937,19 +978,27 @@ describe("captureCompactionEvent", () => {
 describe("hive_create_epic integration - decomposition_complete event", () => {
   let sessionDir: string;
   let sessionId: string;
+  let testDir: string;
+  let testCounter = 0;
   const testProjectPath = "/tmp/test-epic-decomposition";
 
+  beforeAll(() => {
+    testDir = mkdtempSync(join(tmpdir(), "swarm-test-epic-"));
+    sessionDir = join(testDir, "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
-    sessionDir = path.join(os.homedir(), ".config", "swarm-tools", "sessions");
-    sessionId = `test-epic-${Date.now()}`;
+    sessionId = `test-epic-${Date.now()}-${testCounter++}`;
+    process.env.SWARM_SESSIONS_DIR = sessionDir;
   });
 
   afterEach(() => {
-    // Clean up test session file
-    const sessionPath = path.join(sessionDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-    }
+    delete process.env.SWARM_SESSIONS_DIR;
   });
 
   test("captures decomposition_complete event after hive_create_epic succeeds", async () => {
@@ -973,7 +1022,7 @@ describe("hive_create_epic integration - decomposition_complete event", () => {
     });
 
     // WHEN: decomposition_complete event is captured
-    captureCoordinatorEvent({
+    await captureCoordinatorEvent({
       session_id: sessionId,
       epic_id: epicId,
       timestamp: new Date().toISOString(),

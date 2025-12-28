@@ -215,7 +215,8 @@ export interface ViolationDetectionResult {
     | "coordinator_edited_file"
     | "coordinator_ran_tests"
     | "coordinator_reserved_files"
-    | "no_worker_spawned";
+    | "no_worker_spawned"
+    | "worker_completed_without_review";
 
   /** Human-readable message */
   message?: string;
@@ -349,6 +350,27 @@ export function detectCoordinatorViolation(params: {
     };
   }
 
+  // Check for worker completion without review
+  if (toolName === "swarm_complete" || toolName === "hive_close") {
+    const payload = { tool: toolName };
+
+    captureCoordinatorEvent({
+      session_id: sessionId,
+      epic_id: epicId,
+      timestamp: new Date().toISOString(),
+      event_type: "VIOLATION",
+      violation_type: "worker_completed_without_review",
+      payload,
+    });
+
+    return {
+      isViolation: true,
+      violationType: "worker_completed_without_review",
+      message: `⚠️ Coordinator should not complete worker tasks directly. Coordinators should review worker output using swarm_review and swarm_review_feedback.`,
+      payload,
+    };
+  }
+
   return { isViolation: false };
 }
 
@@ -369,8 +391,16 @@ interface CoordinatorContext {
   activatedAt?: number;
 }
 
-/** Global coordinator context state */
-let coordinatorContext: CoordinatorContext = {
+/** 
+ * Session-scoped coordinator contexts
+ * Map of sessionId -> CoordinatorContext
+ */
+const coordinatorContexts = new Map<string, CoordinatorContext>();
+
+/** 
+ * Global coordinator context state (for backward compat when no sessionId provided)
+ */
+let globalCoordinatorContext: CoordinatorContext = {
   isCoordinator: false,
 };
 
@@ -378,33 +408,74 @@ let coordinatorContext: CoordinatorContext = {
  * Set coordinator context
  * 
  * Called when swarm coordination begins (e.g., after hive_create_epic or swarm_decompose).
+ * If sessionId is provided, stores context scoped to that session.
+ * Otherwise updates global context (backward compat).
  * 
  * @param ctx - Coordinator context to set
  */
 export function setCoordinatorContext(ctx: Partial<CoordinatorContext>): void {
-  coordinatorContext = {
-    ...coordinatorContext,
-    ...ctx,
-    activatedAt: ctx.isCoordinator ? Date.now() : coordinatorContext.activatedAt,
-  };
+  const sessionId = ctx.sessionId;
+  
+  if (sessionId) {
+    // Session-scoped: update or create session context
+    const existing = coordinatorContexts.get(sessionId) || { isCoordinator: false };
+    coordinatorContexts.set(sessionId, {
+      ...existing,
+      ...ctx,
+      activatedAt: ctx.isCoordinator ? Date.now() : existing.activatedAt,
+    });
+  } else {
+    // Global context (backward compat)
+    globalCoordinatorContext = {
+      ...globalCoordinatorContext,
+      ...ctx,
+      activatedAt: ctx.isCoordinator ? Date.now() : globalCoordinatorContext.activatedAt,
+    };
+  }
 }
 
 /**
  * Get current coordinator context
  * 
+ * If sessionId provided, returns session-scoped context.
+ * Otherwise returns global context (backward compat).
+ * 
+ * @param sessionId - Optional session ID to get specific session context
  * @returns Current coordinator context state
  */
-export function getCoordinatorContext(): CoordinatorContext {
-  return { ...coordinatorContext };
+export function getCoordinatorContext(sessionId?: string): CoordinatorContext {
+  if (sessionId) {
+    return { ...(coordinatorContexts.get(sessionId) || { isCoordinator: false }) };
+  }
+  return { ...globalCoordinatorContext };
 }
 
 /**
  * Clear coordinator context
  * 
- * Called when swarm coordination ends (e.g., epic closed or session ends).
+ * If sessionId provided, clears only that session.
+ * Otherwise clears global context (backward compat).
+ * 
+ * @param sessionId - Optional session ID to clear specific session
  */
-export function clearCoordinatorContext(): void {
-  coordinatorContext = {
+export function clearCoordinatorContext(sessionId?: string): void {
+  if (sessionId) {
+    coordinatorContexts.delete(sessionId);
+  } else {
+    globalCoordinatorContext = {
+      isCoordinator: false,
+    };
+  }
+}
+
+/**
+ * Clear ALL coordinator contexts (global + all sessions)
+ * 
+ * Use in tests or cleanup scenarios where you need a complete reset.
+ */
+export function clearAllCoordinatorContexts(): void {
+  coordinatorContexts.clear();
+  globalCoordinatorContext = {
     isCoordinator: false,
   };
 }
@@ -416,20 +487,32 @@ export function clearCoordinatorContext(): void {
  * 1. Coordinator context was explicitly set
  * 2. Context was set within the last 4 hours (session timeout)
  * 
+ * If sessionId provided, checks session-scoped context.
+ * Otherwise checks global context (backward compat).
+ * 
+ * @param sessionId - Optional session ID to check specific session
  * @returns Whether we're currently in coordinator mode
  */
-export function isInCoordinatorContext(): boolean {
-  if (!coordinatorContext.isCoordinator) {
+export function isInCoordinatorContext(sessionId?: string): boolean {
+  const ctx = sessionId 
+    ? coordinatorContexts.get(sessionId)
+    : globalCoordinatorContext;
+    
+  if (!ctx || !ctx.isCoordinator) {
     return false;
   }
   
   // Check for session timeout (4 hours)
   const COORDINATOR_TIMEOUT_MS = 4 * 60 * 60 * 1000;
-  if (coordinatorContext.activatedAt) {
-    const elapsed = Date.now() - coordinatorContext.activatedAt;
+  if (ctx.activatedAt) {
+    const elapsed = Date.now() - ctx.activatedAt;
     if (elapsed > COORDINATOR_TIMEOUT_MS) {
       // Session timed out, clear context
-      clearCoordinatorContext();
+      if (sessionId) {
+        coordinatorContexts.delete(sessionId);
+      } else {
+        globalCoordinatorContext = { isCoordinator: false };
+      }
       return false;
     }
   }

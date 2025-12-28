@@ -27,24 +27,21 @@ describe("Query 1: failed-decompositions", () => {
 	test("should select strategy, failure_count, and avg_duration_ms", () => {
 		const query = failedDecompositions();
 
-		expect(query.sql).toContain("json_extract(data, '$.strategy')");
+		expect(query.sql).toContain("strategy");
 		expect(query.sql).toContain("COUNT(*)");
 		expect(query.sql).toContain("AVG");
 		expect(query.sql).toContain("duration_ms");
 	});
 
-	test("should filter for subtask_outcome events where success is false", () => {
+	test("should use coordinator events (decision and outcome)", () => {
 		const query = failedDecompositions();
 
-		// Uses parameterized query (type = ?)
-		expect(query.sql).toContain("type = ?");
-		expect(query.sql).toContain("json_extract(data, '$.success') = ?");
-		// Verify parameters contain the right values
-		if (query.parameters) {
-			const params = Object.values(query.parameters);
-			expect(params).toContain("subtask_outcome");
-			expect(params).toContain("false");
-		}
+		// Uses coordinator_decision for decomposition metadata
+		expect(query.sql).toContain("coordinator_decision");
+		expect(query.sql).toContain("decomposition_complete");
+		// Uses coordinator_outcome for subtask results
+		expect(query.sql).toContain("coordinator_outcome");
+		expect(query.sql).toContain("subtask_success");
 	});
 
 	test("should group by strategy and order by failure count descending", () => {
@@ -70,11 +67,8 @@ describe("Query 1: failed-decompositions", () => {
 	test("should optionally filter by project_key", () => {
 		const query = failedDecompositions({ project_key: "test-project" });
 
-		expect(query.sql).toContain("project_key = ?");
-		expect(query.parameters).toBeDefined();
-		if (query.parameters) {
-			expect(Object.values(query.parameters)).toContain("test-project");
-		}
+		expect(query.sql).toContain("project_key");
+		expect(query.sql).toContain("test-project");
 	});
 
 	test("should optionally limit results", () => {
@@ -99,7 +93,8 @@ describe("Query 2: strategy-success-rates", () => {
 		expect(query.sql).toContain("COUNT(*)");
 		// Should count successes and failures separately
 		expect(query.sql).toContain("success");
-		expect(query.sql).toContain("false");
+		expect(query.sql).toContain("successful_count");
+		expect(query.sql).toContain("failed_count");
 	});
 
 	test("should calculate success_rate as percentage", () => {
@@ -111,13 +106,11 @@ describe("Query 2: strategy-success-rates", () => {
 		expect(query.sql).toContain("100");
 	});
 
-	test("should filter for subtask_outcome events", () => {
+	test("should use coordinator events (decision and outcome)", () => {
 		const query = strategySuccessRates();
 
-		expect(query.sql).toContain("type = ?");
-		if (query.parameters) {
-			expect(Object.values(query.parameters)).toContain("subtask_outcome");
-		}
+		expect(query.sql).toContain("coordinator_decision");
+		expect(query.sql).toContain("coordinator_outcome");
 	});
 
 	test("should group by strategy", () => {
@@ -138,7 +131,8 @@ describe("Query 2: strategy-success-rates", () => {
 	test("should optionally filter by project_key", () => {
 		const query = strategySuccessRates({ project_key: "test-project" });
 
-		expect(query.sql).toContain("project_key = ?");
+		expect(query.sql).toContain("project_key");
+		expect(query.sql).toContain("test-project");
 	});
 });
 

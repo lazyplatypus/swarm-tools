@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  clearHiveAdapterCache,
   hive_create,
   hive_create_epic,
   hive_query,
@@ -83,6 +84,9 @@ async function cleanupBeads() {
 describe("beads integration", () => {
   // Initialize adapter before running tests
   beforeAll(async () => {
+    // Clear cached adapters from previous test runs
+    clearHiveAdapterCache();
+    
     // Set working directory for beads commands
     setBeadsWorkingDirectory(TEST_PROJECT_KEY);
     
@@ -92,6 +96,7 @@ describe("beads integration", () => {
 
   afterAll(async () => {
     await cleanupBeads();
+    clearHiveAdapterCache();
   });
 
   describe("hive_create", () => {
@@ -1456,6 +1461,10 @@ describe("beads integration", () => {
       mkdirSync(hiveDir, { recursive: true });
       const issuesPath = join(hiveDir, "issues.jsonl");
       writeFileSync(issuesPath, "");
+
+      // Create .gitignore to ignore .opencode directory (created by swarm-mail)
+      const gitignorePath = join(tempProject, ".gitignore");
+      writeFileSync(gitignorePath, ".opencode/\n");
 
       // Initial commit
       execSync("git add .", { cwd: tempProject });

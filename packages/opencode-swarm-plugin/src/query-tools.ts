@@ -238,7 +238,7 @@ async function createDbAdapter(): Promise<DatabaseAdapter> {
  * @param params - Optional parameterized query values
  * @returns QueryResult with rows, columns, timing
  */
-async function executeQueryWithDb(
+export async function executeQuery(
 	db: DatabaseAdapter,
 	sql: string,
 	params?: unknown[],
@@ -268,7 +268,7 @@ async function executeQueryWithDb(
  * @param presetName - Name of the preset query
  * @returns QueryResult with rows, columns, timing
  */
-async function executePresetWithDb(
+export async function executePresetQuery(
 	db: DatabaseAdapter,
 	presetName: string,
 ): Promise<QueryResult> {
@@ -279,7 +279,7 @@ async function executePresetWithDb(
 	}
 	
 	const sql = presetQueries[presetName as PresetQueryName];
-	return executeQueryWithDb(db, sql);
+	return executeQuery(db, sql);
 }
 
 /**
@@ -290,12 +290,12 @@ async function executePresetWithDb(
  * @param sql - SQL query string
  * @returns Raw rows array for CLI formatting
  */
-export async function executeQuery(
+export async function executeQueryCLI(
 	projectPath: string,
 	sql: string,
 ): Promise<any[]> {
 	const db = await createDbAdapter();
-	const result = await executeQueryWithDb(db, sql);
+	const result = await executeQuery(db, sql);
 	return result.rows;
 }
 
@@ -312,7 +312,7 @@ export async function executePreset(
 	presetName: string,
 ): Promise<any[]> {
 	const db = await createDbAdapter();
-	const result = await executePresetWithDb(db, presetName);
+	const result = await executePresetQuery(db, presetName);
 	return result.rows;
 }
 
@@ -330,20 +330,19 @@ export async function executePreset(
  * │ AgentA   │     5 │
  * │ AgentB   │     3 │
  * └──────────┴───────┘
- * 2 rows
+ * 2 rows (12.5ms)
  */
-export function formatAsTable(rows: Record<string, unknown>[]): string {
-	const rowCount = rows.length;
-	const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+export function formatAsTable(result: QueryResult): string {
+	const { rows, columns, rowCount, executionTimeMs } = result;
 
 	// Handle empty result set
 	if (rows.length === 0) {
 		const header = columns.join(" │ ");
-		const width = header.length + 4;
+		const width = Math.max(header.length + 4, 20);
 		const footer = `0 rows`;
 		return [
 			`┌${"─".repeat(width - 2)}┐`,
-			`│ ${header} │`,
+			`│ ${header.padEnd(width - 4)} │`,
 			`└${"─".repeat(width - 2)}┘`,
 			footer.padEnd(width),
 		].join("\n");
@@ -393,8 +392,8 @@ export function formatAsTable(rows: Record<string, unknown>[]): string {
 	const bottomBorder = `└${widths.map((w) => "─".repeat(w + 2)).join("┴")}┘`;
 	lines.push(bottomBorder);
 
-	// Footer - pad to match table width
-	const footer = `${rowCount} rows`;
+	// Footer with execution time
+	const footer = `${rowCount} rows (${executionTimeMs.toFixed(1)}ms)`;
 	const tableWidth = topBorder.length;
 	lines.push(footer.padEnd(tableWidth));
 
@@ -409,8 +408,8 @@ export function formatAsTable(rows: Record<string, unknown>[]): string {
  * - Quotes → double them
  * - Newlines → wrap in quotes
  */
-export function formatAsCSV(rows: Record<string, unknown>[]): string {
-	const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+export function formatAsCSV(result: QueryResult): string {
+	const { rows, columns } = result;
 
 	const lines: string[] = [];
 
@@ -447,6 +446,6 @@ export function formatAsCSV(rows: Record<string, unknown>[]): string {
  *   { "name": "AgentB", "count": 3 }
  * ]
  */
-export function formatAsJSON(rows: Record<string, unknown>[]): string {
-	return JSON.stringify(rows, null, 2);
+export function formatAsJSON(result: QueryResult): string {
+	return JSON.stringify(result.rows, null, 2);
 }

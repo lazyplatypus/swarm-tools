@@ -31,6 +31,23 @@ import {
 	swarm_get_versions,
 } from "./swarm-research";
 
+/**
+ * Get plugin directory regardless of where tests are run from
+ * (handles both monorepo root and package directory)
+ */
+function getPluginDir(): string {
+	const cwd = process.cwd();
+	// If we're in the monorepo root, point to packages/opencode-swarm-plugin
+	if (existsSync(join(cwd, "packages/opencode-swarm-plugin/package.json"))) {
+		return join(cwd, "packages/opencode-swarm-plugin");
+	}
+	// If we're already in the plugin directory, use cwd
+	if (existsSync(join(cwd, "package.json"))) {
+		return cwd;
+	}
+	throw new Error("Cannot find plugin directory");
+}
+
 describe("Tool discovery integration", () => {
 	test("discoverDocTools returns available tools", async () => {
 		const tools = await discoverDocTools();
@@ -198,7 +215,7 @@ describe("Lockfile parsing integration", () => {
 
 	test("reads from real bun.lock in this repo", async () => {
 		// Use the plugin package directory which has the dependencies
-		const pluginDir = join(process.cwd(), "packages/opencode-swarm-plugin");
+		const pluginDir = getPluginDir();
 
 		// Query for packages we know exist in the plugin
 		const versions = await getInstalledVersions(pluginDir, [
@@ -650,9 +667,9 @@ describe("Research spawn instructions (NEW)", () => {
 describe("Real-world fixture: this repo", () => {
 	test("discovers tools and versions from actual repo", async () => {
 		// Use the plugin package directory, not monorepo root
-		const pluginDir = join(process.cwd(), "packages/opencode-swarm-plugin");
+		const pluginDir = getPluginDir();
 
-		// Step 1: Tool discovery
+		// Step 1: Discover tools
 		const tools = await discoverDocTools();
 		expect(tools.length).toBeGreaterThan(0);
 
@@ -677,7 +694,7 @@ describe("Real-world fixture: this repo", () => {
 
 	test("research phase with real task on this repo", async () => {
 		// Use the plugin package directory, not monorepo root
-		const pluginDir = join(process.cwd(), "packages/opencode-swarm-plugin");
+		const pluginDir = getPluginDir();
 		const task =
 			"Add Zod validation to swarm coordination with TypeScript types";
 

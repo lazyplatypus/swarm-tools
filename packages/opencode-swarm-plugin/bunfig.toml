@@ -10,3 +10,16 @@ timeout = 10000
 
 # Preload scripts (if needed)
 # preload = ["./test-setup.ts"]
+
+# NOTE: Some tests fail when run in full suite but pass individually.
+# This is due to Bun's mock.module() not isolating between test files.
+# Tests using mock.module() for ./hive, ./logger, swarm-mail will have
+# their mocks overwritten by earlier tests in the suite.
+#
+# Known affected tests (run individually to verify they pass):
+# - src/compaction-hook.test.ts
+# - src/compaction-capture.integration.test.ts
+# - src/tool-adapter.integration.test.ts (vitest, runs with bun)
+#
+# Long-term fix: migrate to vitest for proper test isolation, or
+# restructure tests to use dependency injection instead of module mocks.
