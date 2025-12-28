@@ -1,71 +1,75 @@
 /**
- * Main App component - Swarm Dashboard
+ * Main Swarm Dashboard application
  * 
- * Architecture:
- * - WebSocket connection to localhost:4483/ws for real-time updates (4483 = HIVE on phone keypad)
- * - Uses partysocket for battle-tested reconnection logic
- * - All panes derive state from WebSocket events (event-driven architecture)
- * - Layout provides responsive 3-column grid
+ * Integrates three panes:
+ * - AgentsPane: Active agents with status indicators
+ * - EventsPane: Live SSE event stream with filtering
+ * - CellsPane: Epic/subtask tree hierarchy
  */
 
-import { Layout, ConnectionStatus } from "./components";
-import { AgentsPane } from "./components/AgentsPane";
-import { EventsPane } from "./components/EventsPane";
-import { CellsPane } from "./components/CellsPane";
-import { useSwarmSocket } from "./hooks";
+import { AgentsPane, EventsPane, CellsPane } from "./components";
+import { useSwarmEvents } from "./hooks";
+import { Layout, Pane } from "./components/Layout";
 import "./App.css";
 
-const WS_URL = "ws://localhost:4483/ws";
-
-/**
- * Swarm Dashboard - Real-time multi-agent coordination UI
- * 
- * Shows:
- * - Active agents with current tasks (WebSocket-driven)
- * - Live event stream with filtering (WebSocket-driven)
- * - Cell hierarchy tree with status (WebSocket-driven)
- * - Connection status with automatic reconnection
- */
 function App() {
-  const { state, events, ws } = useSwarmSocket(WS_URL);
-
-  // Map WebSocket state to ConnectionStatus state
-  // 'reconnecting' and 'error' both map to 'disconnected' for the component
-  const connectionState: "connecting" | "connected" | "disconnected" =
-    state === "connected" ? "connected" :
-    state === "connecting" ? "connecting" :
-    "disconnected"; // reconnecting, error, disconnected all map to disconnected
-
-  // Reconnect handler - partysocket handles this automatically,
-  // but we expose the reconnect method for manual retry
-  const handleReconnect = () => {
-    if (ws.reconnect) {
-      ws.reconnect();
-    } else {
-      // Fallback: close and let partysocket auto-reconnect
-      ws.close();
-    }
-  };
+  // Connect to SSE stream - provides events for all panes
+  const { state, events } = useSwarmEvents({
+    url: "http://localhost:3333/sse",
+  });
+  
+  const isConnected = state === "connected";
 
   return (
-    <Layout
-      connectionStatus={
-        <ConnectionStatus
-          connectionState={connectionState}
-          error={state === "error" ? "Connection failed" : undefined}
-          onReconnect={handleReconnect}
-        />
-      }
-    >
-      {/* AgentsPane - derives agent status from events */}
-      <AgentsPane events={events} state={state} />
-      
-      {/* EventsPane - shows live event stream */}
-      <EventsPane events={events} />
-      
-      {/* CellsPane - derives cell tree from events */}
-      <CellsPane events={events} />
-    </Layout>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      {/* Header with connection status */}
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              🐝 Swarm Dashboard
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Multi-agent coordination visualization
+            </p>
+          </div>
+          
+          {/* Connection status indicator */}
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected
+                  ? "bg-green-500 animate-pulse"
+                  : "bg-red-500"
+              }`}
+              title={isConnected ? "Connected" : "Disconnected"}
+              data-testid="connection-status"
+            />
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {isConnected ? "Connected" : "Disconnected"}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* 3-pane responsive grid */}
+      <Layout>
+        {/* Agents Pane */}
+        <Pane>
+          <AgentsPane />
+        </Pane>
+
+        {/* Events Pane */}
+        <Pane>
+          <EventsPane events={events} />
+        </Pane>
+
+        {/* Cells Pane */}
+        <Pane>
+          <CellsPane onCellSelect={(id) => console.log("Selected cell:", id)} />
+        </Pane>
+      </Layout>
+    </div>
   );
 }
 

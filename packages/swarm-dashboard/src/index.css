@@ -1,33 +1,11 @@
-@layer base, utils, components;
-
-@import '@webtui/css';
-@import '@webtui/theme-catppuccin';
 @import "tailwindcss";
 
-/* ═══════════════════════════════════════════════════════════════
-   WCAG AA Contrast Overrides for Catppuccin
-   
-   Problem: Default --foreground2 (overlay2) is too dim for text
-   Solution: Use higher contrast values while staying in palette
-   
-   Catppuccin Mocha palette (dark):
-   - base: #1e1e2e (bg)
-   - text: #cdd6f4 (primary text) - 11.4:1 contrast ✓
-   - subtext1: #bac2de - 8.9:1 contrast ✓
-   - subtext0: #a6adc8 - 6.8:1 contrast ✓
-   - overlay2: #9399b2 - 5.2:1 contrast (borderline)
-   - overlay1: #7f849c - 4.0:1 contrast ✗ (fails AA for small text)
-   - overlay0: #6c7086 - 3.2:1 contrast ✗
-   
-   WCAG AA requires:
-   - 4.5:1 for normal text
-   - 3:1 for large text (18px+ or 14px+ bold)
-   ═══════════════════════════════════════════════════════════════ */
-
 :root {
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
+
+  color-scheme: light dark;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -35,97 +13,28 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Override low-contrast foreground2 with subtext0 for better readability */
-[data-webtui-theme|=catppuccin] {
-  --foreground2: var(--subtext0);
+* {
+  box-sizing: border-box;
 }
 
-/* Apply theme colors to body */
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background-color: var(--base, var(--background0));
-  color: var(--text, var(--foreground0));
 }
 
-/* Links use theme accent */
-a {
-  font-weight: 500;
-  color: var(--sky, var(--blue, #646cff));
-  text-decoration: inherit;
-}
-a:hover {
-  color: var(--sapphire, var(--blue, #535bf2));
+#root {
+  min-height: 100vh;
 }
 
-/* Headings */
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-  color: var(--foreground0);
-}
-
-/* Buttons use theme colors */
-button {
-  border-radius: 8px;
-  border: 1px solid var(--foreground2, transparent);
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: var(--background1);
-  color: var(--foreground0);
-  cursor: pointer;
-  transition: border-color 0.25s, background-color 0.25s;
-}
-button:hover {
-  border-color: var(--mauve, var(--blue, #646cff));
-  background-color: var(--background2);
-}
-button:focus,
-button:focus-visible {
-  outline: 2px solid var(--mauve, var(--blue));
+/* Focus styles for keyboard navigation */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #3b82f6;
   outline-offset: 2px;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Custom Scrollbars - Catppuccin Mocha themed
-   Thin, sleek, doesn't scream "I'm a scrollbar"
-   ═══════════════════════════════════════════════════════════════ */
-
-/* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--surface2, #585b70) var(--surface0, #313244);
-}
-
-/* Webkit (Chrome, Safari, Edge) */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--surface0, #313244);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--surface2, #585b70);
-  border-radius: 4px;
-  border: 2px solid var(--surface0, #313244);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--overlay0, #6c7086);
-}
-
-::-webkit-scrollbar-thumb:active {
-  background: var(--mauve, #cba6f7);
-}
-
-/* Corner piece where scrollbars meet */
-::-webkit-scrollbar-corner {
-  background: var(--surface0, #313244);
+/* Smooth scrolling for auto-scroll containers */
+.smooth-scroll {
+  scroll-behavior: smooth;
 }
