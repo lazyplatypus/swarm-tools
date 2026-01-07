@@ -392,6 +392,24 @@ PGLite may fail to initialize in parallel test runs. Tests fall back to in-memor
 
 **Note:** PGLite is deprecated. New code should use libSQL via `createInMemorySwarmMail()` or `getSwarmMailLibSQL()`.
 
+### libSQL Vector Extension: COUNT(*) Quirk
+
+**Known issue:** `COUNT(*)` returns 0 on tables with vector columns, but data IS there.
+
+```sql
+-- WRONG: Returns 0 even with 9000+ rows
+SELECT COUNT(*) FROM memories;  -- Returns: 0
+
+-- CORRECT: Use COUNT(column_name) instead
+SELECT COUNT(id) FROM memories;  -- Returns: 9021
+```
+
+**Why?** The libSQL vector extension (`F32_BLOB`) interferes with `COUNT(*)` aggregation. This is a known quirk, not a bug in our code.
+
+**Affected tables:** `memories` (has `embedding F32_BLOB(1024)` column)
+
+**Workaround:** Always use `COUNT(id)` or `COUNT(column_name)` instead of `COUNT(*)` when querying tables with vector columns.
+
 ## Naming Convention: The Hive Metaphor 🐝
 
 We use bee/hive metaphors consistently across the project. This isn't just branding - it's a mental model for multi-agent coordination.

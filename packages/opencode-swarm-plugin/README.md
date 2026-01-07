@@ -498,6 +498,20 @@ When eval scores drop >15% from baseline, failure context is automatically store
 
 See **[evals/README.md](./evals/README.md)** for full architecture, scorer details, CI integration, and how to write new evals.
 
+### Maintenance
+
+**Clean test session files:**
+
+```bash
+# Remove test session files from global sessions directory
+./scripts/clean-test-sessions.sh
+
+# Dry run (see what would be deleted)
+./scripts/clean-test-sessions.sh --dry-run
+```
+
+Test session files (`test*.jsonl`, `no-context*.jsonl`, `timing-test*.jsonl`) accumulate in `~/.config/swarm-tools/sessions/` during development. Run this script periodically to clean them up.
+
 ---
 
 ## CLI Reference
