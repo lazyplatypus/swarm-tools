@@ -375,7 +375,7 @@ function detectSchemaVersion(tables: string[]): SchemaVersion {
  * Table column definitions (excluding id to avoid conflicts)
  */
 const TABLE_COLUMNS: Record<string, string> = {
-	events: "type, project_key, timestamp, data, created_at",
+	events: "type, project_key, timestamp, data",
 	agents: "project_key, name, program, model, task_description, registered_at, last_active_at",
 	messages: "project_key, from_agent, subject, body, thread_id, importance, ack_required, created_at",
 	message_recipients: "message_id, agent_name, read_at, acked_at",

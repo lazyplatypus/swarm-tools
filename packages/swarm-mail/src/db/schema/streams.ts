@@ -39,7 +39,6 @@ export const eventsTable = sqliteTable(
     // We mark it as generated so Drizzle doesn't try to INSERT into it
     sequence: integer("sequence").generatedAlwaysAs(sql`id`),
     data: text("data").notNull(), // JSON string
-    created_at: text("created_at").default("datetime('now')"),
   },
   (table) => ({
     projectKeyIdx: index("idx_events_project_key").on(table.project_key),
@@ -266,7 +265,6 @@ export const decisionTracesTable = sqliteTable(
     outcome_event_id: integer("outcome_event_id"),
     quality_score: real("quality_score"), // Computed from outcome events
     timestamp: integer("timestamp").notNull(),
-    created_at: text("created_at").default("(datetime('now'))"),
   },
   (table) => ({
     epicIdx: index("idx_decision_traces_epic").on(table.epic_id),
@@ -306,7 +304,6 @@ export const entityLinksTable = sqliteTable(
     link_type: text("link_type").notNull(), // 'cites_precedent', 'applies_pattern', 'similar_to'
     strength: real("strength").default(1.0),
     context: text("context"),
-    created_at: text("created_at").default("(datetime('now'))"),
   },
   (table) => ({
     sourceIdx: index("idx_entity_links_source").on(table.source_decision_id),

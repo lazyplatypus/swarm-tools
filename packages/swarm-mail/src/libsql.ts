@@ -306,6 +306,12 @@ export async function createLibSQLAdapter(
 	// Verify connection with a simple query
 	await client.execute("SELECT 1");
 
+	// CRITICAL: Enable incremental auto vacuum to prevent database bloat
+	// MUST be set BEFORE any tables are created - it's a one-time setting
+	// Incremental mode marks freed pages for reuse without blocking operations
+	// (unlike FULL vacuum which requires exclusive lock and rebuilds entire DB)
+	await client.execute("PRAGMA auto_vacuum = INCREMENTAL");
+
 	// CRITICAL: Enable foreign key constraints
 	// libSQL enables FK by default, but we set it explicitly for:
 	// 1. Defensive programming (guards against future libSQL changes)
@@ -317,6 +323,12 @@ export async function createLibSQLAdapter(
 	// Set busy_timeout to 5 seconds for automatic retry on SQLITE_BUSY
 	// This prevents "database is locked" errors during concurrent access
 	await client.execute("PRAGMA busy_timeout = 5000");
+
+	// Enable WAL (Write-Ahead Logging) mode for better concurrent performance
+	// WAL allows readers to not block writers and vice versa
+	// This is especially beneficial for multi-agent coordination where multiple
+	// agents may be reading/writing events simultaneously
+	await client.execute("PRAGMA journal_mode = WAL");
 
 	return new LibSQLAdapter(client);
 }

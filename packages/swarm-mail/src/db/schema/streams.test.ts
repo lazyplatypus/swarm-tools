@@ -22,7 +22,7 @@ describe("Streams Schema", () => {
     expect(eventsTable.timestamp).toBeDefined();
     expect(eventsTable.sequence).toBeDefined();
     expect(eventsTable.data).toBeDefined();
-    expect(eventsTable.created_at).toBeDefined();
+    // Note: created_at was removed - timestamp is the single source of truth
   });
 
   test("agentsTable has correct structure", () => {
