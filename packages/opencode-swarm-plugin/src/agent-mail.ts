@@ -38,8 +38,10 @@ import type { MailSessionState } from "swarm-mail";
 // ============================================================================
 
 const AGENT_MAIL_URL = "http://127.0.0.1:8765";
-const DEFAULT_TTL_SECONDS = 3600; // 1 hour
 const MAX_INBOX_LIMIT = 5; // HARD CAP - never exceed this
+
+/** Default OpenCode model for Agent Mail registration. */
+const DEFAULT_OPENCODE_MODEL = "openai/gpt-5.2-codex";
 
 /**
  * Default project directory for Agent Mail operations
@@ -942,7 +944,7 @@ async function reRegisterAgent(
     await mcpCall<AgentInfo>("register_agent", {
       project_key: projectKey,
       program: "opencode",
-      model: "claude-opus-4",
+      model: DEFAULT_OPENCODE_MODEL,
       name: agentName,
       task_description: taskDescription || "Re-registered after server restart",
     });
@@ -1169,7 +1171,7 @@ export const agentmail_init = tool({
         const agent = await mcpCall<AgentInfo>("register_agent", {
           project_key: projectPath,
           program: "opencode",
-          model: "claude-opus-4",
+          model: DEFAULT_OPENCODE_MODEL,
           name: args.agent_name, // undefined = auto-generate
           task_description: args.task_description || "",
         });
@@ -1417,8 +1419,9 @@ export const agentmail_reserve = tool({
       .describe("File paths or globs to reserve (e.g., src/auth/**)"),
     ttl_seconds: tool.schema
       .number()
-      .optional()
-      .describe(`Time to live in seconds (default: ${DEFAULT_TTL_SECONDS})`),
+      .int()
+      .positive()
+      .describe("Time to live in seconds (required)"),
     exclusive: tool.schema
       .boolean()
       .optional()
@@ -1434,11 +1437,18 @@ export const agentmail_reserve = tool({
     // Check rate limit
     await checkRateLimit(state.agentName, "reserve");
 
+    if (!args.ttl_seconds || args.ttl_seconds <= 0) {
+      throw new AgentMailError(
+        "ttl_seconds is required for file reservations",
+        "file_reservation_paths",
+      );
+    }
+
     const result = await mcpCall<ReservationResult>("file_reservation_paths", {
       project_key: state.projectKey,
       agent_name: state.agentName,
       paths: args.paths,
-      ttl_seconds: args.ttl_seconds || DEFAULT_TTL_SECONDS,
+      ttl_seconds: args.ttl_seconds,
       exclusive: args.exclusive ?? true,
       reason: args.reason || "",
     });
@@ -1511,13 +1521,20 @@ export const agentmail_release = tool({
     // Check rate limit
     await checkRateLimit(state.agentName, "release");
 
+    const shouldUseStoredIds =
+      !args.paths && (!args.reservation_ids || args.reservation_ids.length === 0);
+    const reservationIds =
+      shouldUseStoredIds && state.reservations.length > 0
+        ? state.reservations
+        : args.reservation_ids;
+
     const result = await mcpCall<{ released: number; released_at: string }>(
       "release_file_reservations",
       {
         project_key: state.projectKey,
         agent_name: state.agentName,
         paths: args.paths,
-        file_reservation_ids: args.reservation_ids,
+        file_reservation_ids: reservationIds,
       },
     );
 

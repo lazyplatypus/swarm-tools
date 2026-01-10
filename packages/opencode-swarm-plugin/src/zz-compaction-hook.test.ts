@@ -82,6 +82,11 @@ describe("Compaction Hook", () => {
       expect(SWARM_COMPACTION_CONTEXT).toContain("swarmmail_inbox");
     });
 
+    it("allows swarmmail_release_all for stale reservations", () => {
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarmmail_release_all");
+      expect(SWARM_COMPACTION_CONTEXT).toMatch(/stale|orphaned|expired/i);
+    });
+
     it("contains summary format", () => {
       expect(SWARM_COMPACTION_CONTEXT).toContain("Swarm State");
       expect(SWARM_COMPACTION_CONTEXT).toContain("Active:");

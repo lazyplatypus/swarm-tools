@@ -42,6 +42,7 @@ import {
 import { getHiveAdapter, getHiveWorkingDirectory } from "./hive";
 import { createChildLogger } from "./logger";
 import { captureCompactionEvent } from "./eval-capture";
+import { getAlwaysOnGuidanceSkill } from "./skills";
 
 let _logger: any | undefined;
 
@@ -101,6 +102,9 @@ Context was compacted but the swarm is still running. **YOU ARE THE COORDINATOR.
 
 Your role is ORCHESTRATION, not implementation. The resume steps above (if present) tell you exactly what to do first.
 
+## 🔧 ALWAYS-ON GUIDANCE
+${getAlwaysOnGuidanceSkill({ role: "coordinator" })}
+
 ---
 
 ## 🎯 WHAT GOOD LOOKS LIKE (Behavioral Examples)
@@ -157,9 +161,11 @@ You are the **COORDINATOR**. Your job is ORCHESTRATION, not implementation.
 ### What Coordinators Do:
 - ✅ Spawn workers for implementation tasks
 - ✅ Monitor worker progress via \`swarm_status\` and \`swarmmail_inbox\`
+- ✅ Use \`swarmmail_release_all\` to clear stale/orphaned reservations (coordinator override)
 - ✅ Review completed work with \`swarm_review\`
 - ✅ Unblock dependencies and resolve conflicts
 - ✅ Close the loop when epics complete
+
 
 ### What Coordinators NEVER Do:
 - ❌ **NEVER** edit or write files directly

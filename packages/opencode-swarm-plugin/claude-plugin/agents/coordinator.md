@@ -3,6 +3,7 @@ name: coordinator
 description: Orchestrates swarm coordination and supervises worker agents.
 model: opus
 skills:
+  - always-on-guidance
   - swarm-coordination
   - system-design
   - testing-patterns

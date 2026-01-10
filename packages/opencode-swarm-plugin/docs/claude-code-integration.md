@@ -4,7 +4,7 @@
 
 ## Summary
 
-This document describes changes made to enable the opencode-swarm-plugin to work with Claude Code instead of (or alongside) OpenCode.
+This document describes changes made to enable the opencode-swarm-plugin to work with Claude Code instead of (or alongside) OpenCode. Claude plugin agents now include always-on guidance in prompts and compaction resumes, with model-alignment defaults (GPT-5.2-code vs Opus 4.5) and tool-priority rules.
 
 ## Problem
 
@@ -67,6 +67,15 @@ Contains:
 ```
 @modelcontextprotocol/sdk@1.25.2
 ```
+
+### 5. Always-On Guidance Skill
+
+**NEW/UPDATED** - Claude plugin coordinator/worker prompts load `always-on-guidance`, and compaction resumes include it too.
+
+Includes:
+- Tool priority order (swarm plugin tools → Read/Edit → search → Bash)
+- Instruction priority (system → developer → user → AGENTS)
+- Model defaults (GPT-5.2-code terse checklists, Opus 4.5 brief rationale)
 
 ## What Was NOT Changed
 

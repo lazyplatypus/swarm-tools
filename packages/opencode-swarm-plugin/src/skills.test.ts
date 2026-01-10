@@ -18,6 +18,7 @@ import {
   listSkills,
   setSkillsProjectDirectory,
   invalidateSkillsCache,
+  getAlwaysOnGuidanceSkill,
   type Skill,
   type SkillRef,
 } from "./skills";
@@ -354,6 +355,56 @@ describe("ES module compatibility", () => {
     const currentDir = new URL(".", import.meta.url).pathname;
     expect(currentDir).toBeDefined();
     expect(currentDir.endsWith("/")).toBe(true);
+  });
+});
+
+// ============================================================================
+// Tests: Always-On Guidance Skill
+// ============================================================================
+
+describe("getAlwaysOnGuidanceSkill", () => {
+  it("includes tool priority order guidance", () => {
+    const result = getAlwaysOnGuidanceSkill({ role: "worker" });
+
+    expect(result).toContain("Tool Priority Order");
+    expect(result).toContain("swarm");
+    expect(result).toContain("Read");
+    expect(result).toContain("Bash");
+  });
+
+  it("adds GPT-5.2-code guidance when model matches", () => {
+    const result = getAlwaysOnGuidanceSkill({
+      role: "worker",
+      model: "openai/gpt-5.2-code",
+    });
+
+    expect(result).toContain("GPT-5.2-code");
+    expect(result).toMatch(/strict|literal|exact/i);
+  });
+
+  it("adds Opus 4.5 guidance when model matches", () => {
+    const result = getAlwaysOnGuidanceSkill({
+      role: "coordinator",
+      model: "anthropic/claude-opus-4-5",
+    });
+
+    expect(result).toContain("Opus 4.5");
+    expect(result).toMatch(/concise|discipline|deliberate/i);
+  });
+
+  it("includes role-specific enforcement", () => {
+    const coordinator = getAlwaysOnGuidanceSkill({ role: "coordinator" });
+    const worker = getAlwaysOnGuidanceSkill({ role: "worker" });
+
+    expect(coordinator).toMatch(/Coordinator|Orchestrate|Spawn/i);
+    expect(worker).toMatch(/Worker|Reserve|TDD/i);
+  });
+
+  it("mentions swarmmail_release_all for stale reservations", () => {
+    const coordinator = getAlwaysOnGuidanceSkill({ role: "coordinator" });
+
+    expect(coordinator).toContain("swarmmail_release_all");
+    expect(coordinator).toMatch(/stale|orphaned|expired/i);
   });
 });
 

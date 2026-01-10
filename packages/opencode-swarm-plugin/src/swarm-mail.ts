@@ -31,6 +31,7 @@ import {
   getActiveReservations,
   type MailSessionState,
 } from "swarm-mail";
+import { isInCoordinatorContext } from "./planning-guardrails";
 import {
   existsSync,
   mkdirSync,
@@ -188,6 +189,33 @@ export function clearSessionState(sessionID: string): void {
   } catch {
     // Ignore errors
   }
+}
+
+function hasCoordinatorOverride(sessionID?: string): boolean {
+  return isInCoordinatorContext(sessionID) || isInCoordinatorContext();
+}
+
+function formatCoordinatorOverrideError(params: {
+  tool: "swarmmail_release_all" | "swarmmail_release_agent";
+  state: SwarmMailState;
+  sessionID: string;
+}): string {
+  return JSON.stringify(
+    {
+      error:
+        "Coordinator-only override. Ask the coordinator to use this tool for stale or orphaned reservations.",
+      guard: "coordinator_only",
+      required_context: "coordinator",
+      tool: params.tool,
+      agent_name: params.state.agentName,
+      project_key: params.state.projectKey,
+      session_id: params.sessionID,
+      suggestion:
+        "If reservations are stale, notify the coordinator via swarmmail_send before releasing.",
+    },
+    null,
+    2,
+  );
 }
 
 // ============================================================================
@@ -653,6 +681,14 @@ export const swarmmail_release_all = tool({
       );
     }
 
+    if (!hasCoordinatorOverride(sessionID)) {
+      return formatCoordinatorOverrideError({
+        tool: "swarmmail_release_all",
+        state,
+        sessionID,
+      });
+    }
+
     try {
       const result = await releaseAllSwarmFiles({
         projectPath: state.projectKey,
@@ -701,6 +737,14 @@ export const swarmmail_release_agent = tool({
         null,
         2,
       );
+    }
+
+    if (!hasCoordinatorOverride(sessionID)) {
+      return formatCoordinatorOverrideError({
+        tool: "swarmmail_release_agent",
+        state,
+        sessionID,
+      });
     }
 
     try {

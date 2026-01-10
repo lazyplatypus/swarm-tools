@@ -71,6 +71,16 @@ async function buildEntry(entry: BuildEntry, useCliExternals = false): Promise<v
 
 import { cpSync, mkdirSync } from "fs";
 import { join } from "path";
+import { copyClaudePluginRuntimeAssets } from "../src/claude-plugin/claude-plugin-assets";
+
+/**
+ * Sync compiled runtime assets into the Claude plugin dist folder.
+ */
+function syncClaudePluginRuntimeAssets(packageRoot: string): void {
+  console.log("\n🧰 Syncing Claude plugin runtime bundle...");
+  copyClaudePluginRuntimeAssets({ packageRoot });
+  console.log("   Copied dist to claude-plugin/dist");
+}
 
 async function main() {
   console.log("🔨 Building opencode-swarm-plugin...\n");
@@ -122,8 +132,11 @@ async function main() {
     console.error("❌ TypeScript compilation failed");
     process.exit(1);
   }
-  
+
+  syncClaudePluginRuntimeAssets(process.cwd());
+
   const duration = ((Date.now() - start) / 1000).toFixed(2);
+
   console.log(`\n✨ Build complete in ${duration}s`);
 }
 

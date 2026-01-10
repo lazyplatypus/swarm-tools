@@ -86,6 +86,110 @@ export interface SkillRef {
 }
 
 // =============================================================================
+// Always-On Guidance Skill
+// =============================================================================
+
+/**
+ * Role types for always-on guidance injection.
+ */
+export type AlwaysOnGuidanceRole = "coordinator" | "worker";
+
+/**
+ * Options for always-on guidance skill rendering.
+ */
+export interface AlwaysOnGuidanceOptions {
+  role: AlwaysOnGuidanceRole;
+  model?: string;
+}
+
+const ALWAYS_ON_GUIDANCE_HEADER = "## Always-On Guidance Skill";
+
+const ALWAYS_ON_TOOL_PRIORITY = `### Tool Priority Order
+1. Swarm plugin tools (\`hive_*\`, \`swarm_*\`, \`swarmmail_*\`, \`structured_*\`)
+2. \`Read\`/\`Edit\` for file operations
+3. \`ast-grep\` for structural search
+4. \`Glob\`/\`Grep\` for discovery
+5. \`Task\` subagents for exploration
+6. \`Bash\` only for system commands
+
+**Never use Bash for file read/write/edit/search.**`;
+
+const ALWAYS_ON_RULE_FOLLOWING = `### Rule-Following Guardrails
+- Follow explicit tool constraints and approval modes
+- Do not invent tool output or files; ask when unsure
+- Keep changes scoped to assigned files and requirements`;
+
+const ALWAYS_ON_ROLE_GUIDANCE: Record<AlwaysOnGuidanceRole, string> = {
+  coordinator: `### Coordinator Enforcement
+- Coordinator role: orchestrate, decompose, spawn workers
+- **Never** edit files or reserve locks directly
+- Coordinator override: use \`swarmmail_release_all\` only for stale/orphaned reservations (announce in Swarm Mail)
+- Review work with \`swarm_review\` before accepting`,
+  worker: `### Worker Enforcement
+- Worker role: implement changes within reserved files
+- Reserve files before edits and follow TDD (RED → GREEN → REFACTOR)
+- Complete with \`swarm_complete\`, not \`hive_close\``,
+};
+
+const GPT_5_2_GUIDANCE = `#### GPT-5.2-code (Strict)
+- Follow instructions literally and exactly
+- Enforce tool priority order; fail closed if a tool is missing
+- Read before Edit; no speculative changes or output`;
+
+const OPUS_4_5_GUIDANCE = `#### Opus 4.5 (Concise)
+- Be concise and deliberate while obeying mandates
+- Follow tool priorities without shortcuts
+- Prefer direct answers over speculation`;
+
+/**
+ * Resolve the model guidance bucket for always-on instructions.
+ */
+function resolveGuidanceModel(model?: string):
+  | "gpt-5.2-code"
+  | "opus-4.5"
+  | "unknown" {
+  if (!model) return "unknown";
+  const normalized = model.toLowerCase();
+
+  if (normalized.includes("gpt-5.2")) {
+    return "gpt-5.2-code";
+  }
+
+  if (normalized.includes("opus-4-5") || normalized.includes("opus 4.5")) {
+    return "opus-4.5";
+  }
+
+  return "unknown";
+}
+
+/**
+ * Get the always-on guidance skill content for a role and model.
+ */
+export function getAlwaysOnGuidanceSkill(
+  options: AlwaysOnGuidanceOptions,
+): string {
+  const roleGuidance = ALWAYS_ON_ROLE_GUIDANCE[options.role];
+  const modelBucket = resolveGuidanceModel(options.model);
+
+  let modelGuidance = "";
+  if (modelBucket === "gpt-5.2-code") {
+    modelGuidance = `### Model-Specific Guidance\n${GPT_5_2_GUIDANCE}`;
+  } else if (modelBucket === "opus-4.5") {
+    modelGuidance = `### Model-Specific Guidance\n${OPUS_4_5_GUIDANCE}`;
+  } else {
+    modelGuidance = `### Model-Specific Guidance\n${GPT_5_2_GUIDANCE}\n\n${OPUS_4_5_GUIDANCE}`;
+  }
+
+  return [
+    ALWAYS_ON_GUIDANCE_HEADER,
+    ALWAYS_ON_TOOL_PRIORITY,
+    ALWAYS_ON_RULE_FOLLOWING,
+    roleGuidance,
+    modelGuidance,
+  ].join("\n\n");
+}
+
+// =============================================================================
 // State
 // =============================================================================
 

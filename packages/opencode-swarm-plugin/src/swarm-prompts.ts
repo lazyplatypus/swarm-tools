@@ -687,6 +687,15 @@ swarm_spawn_subtask(
 Task(subagent_type="swarm-worker", prompt="<from above>")
 \`\`\`
 
+### Coordinator Override: Release Stale Reservations
+
+You may call \`swarmmail_release_all\` ONLY to clear **stale or orphaned reservations** when workers are gone or unresponsive.
+
+**Rules:**
+- Confirm workers are offline or blocked before releasing
+- Announce the release in Swarm Mail
+- Use it **only** as a coordinator override for stale locks
+
 ### Why This Matters
 
 | Coordinator Work | Worker Work | Consequence of Mixing |
@@ -1440,6 +1449,7 @@ export function formatResearcherPrompt(params: {
 export function formatCoordinatorPrompt(params: {
   task: string;
   projectPath: string;
+  model?: string;
 }): string {
   return COORDINATOR_PROMPT
     .replace(/{task}/g, params.task)
@@ -1459,6 +1469,7 @@ export async function formatSubtaskPromptV2(params: {
   compressed_context?: string;
   error_context?: string;
   project_path?: string;
+  model?: string;
   recovery_context?: {
     shared_context?: string;
     skills_to_load?: string[];
@@ -1538,6 +1549,7 @@ export async function formatSubtaskPromptV2(params: {
   const sharedContextWithInsights = insights
     ? `${params.shared_context || "(none)"}\n\n${insights}`
     : params.shared_context || "(none)";
+
 
   return SUBTASK_PROMPT_V2.replace(/{bead_id}/g, params.bead_id)
     .replace(/{epic_id}/g, params.epic_id)
@@ -1689,6 +1701,7 @@ export const swarm_spawn_subtask = tool({
       shared_context: args.shared_context,
       project_path: args.project_path,
       recovery_context: args.recovery_context,
+      model: args.model,
     });
 
     // Import selectWorkerModel at function scope to avoid circular dependencies

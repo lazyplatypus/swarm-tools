@@ -55,6 +55,13 @@ Install from the Claude Code marketplace:
 
 Then pick **Marketplace → opencode-swarm-plugin → Install**.
 
+**GitHub marketplace (this repo):**
+
+```
+/plugin marketplace add joelhooks/swarm-tools
+/plugin install swarm@swarm-tools
+```
+
 **Global install (npm):**
 
 ```bash
@@ -69,6 +76,18 @@ swarm claude init
 ```
 
 **MCP auto-launch:** Claude Code starts MCP servers declared in the plugin `mcpServers` config automatically. You only need `swarm mcp-serve` when debugging outside Claude Code.
+
+### MCP Troubleshooting (Marketplace Install)
+
+If Claude Code shows "MCP server failed" or the swarm tools are missing, the plugin likely wasn't built.
+
+1. From the repo root, build the plugin:
+   ```bash
+   bun install
+   bun turbo build --filter=opencode-swarm-plugin
+   ```
+2. Confirm `packages/opencode-swarm-plugin/dist/` exists.
+3. Reinstall the plugin from `/plugin` and restart OpenCode.
 
 ---
 
@@ -534,6 +553,8 @@ skills_use(name="swarm-coordination")   // Multi-agent decomposition
 - `cli-builder` - Argument parsing, help text, subcommands
 - `system-design` - Architecture decisions, module boundaries
 - `learning-systems` - Confidence decay, pattern maturity
+
+**Always-on guidance:** Injected into coordinator + worker prompts and compaction resumes. Enforces instruction priority and tool order (swarm plugin tools → Read/Edit → search → Bash). Model defaults: GPT-5.2-code stays terse and checklist-driven; Opus 4.5 allows brief rationale.
 
 **Create your own:**
 

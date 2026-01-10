@@ -30,6 +30,7 @@
     "dist",
     "bin",
     "claude-plugin",
+    "claude-plugin/dist",
     "examples",
     "global-skills",
     "README.md"

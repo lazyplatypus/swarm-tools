@@ -145,6 +145,22 @@ describe("SUBTASK_PROMPT_V2", () => {
   });
 });
 
+describe("COORDINATOR_PROMPT", () => {
+  test("allows swarmmail_release_all for stale reservations", () => {
+    expect(COORDINATOR_PROMPT).toContain("swarmmail_release_all");
+    expect(COORDINATOR_PROMPT).toMatch(/stale|orphaned|expired/i);
+  });
+
+  test("frames release_all as coordinator-only override", () => {
+    const sectionMatch = COORDINATOR_PROMPT.match(/release_all[\s\S]*?(?=\n## |$)/i);
+    expect(sectionMatch).not.toBeNull();
+    if (!sectionMatch) return;
+
+    expect(sectionMatch[0]).toMatch(/coordinator|override/i);
+    expect(sectionMatch[0]).toMatch(/only|limited|exception/i);
+  });
+});
+
 describe("formatSubtaskPromptV2", () => {
   test("substitutes all placeholders correctly", async () => {
     const result = await formatSubtaskPromptV2({
@@ -177,6 +193,8 @@ describe("formatSubtaskPromptV2", () => {
     expect(result).toMatch(/Step 2:.*MANDATORY/i);
     expect(result).toContain("hivemind_find");
   });
+
+
 });
 
 describe("swarm_spawn_subtask tool", () => {
@@ -931,6 +949,8 @@ describe("formatCoordinatorPrompt", () => {
     });
     expect(result).toContain("/Users/joel/my-project");
   });
+
+
 
   test("returns complete prompt with all phases", () => {
     const result = formatCoordinatorPrompt({ 

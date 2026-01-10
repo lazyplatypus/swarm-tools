@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
+import { loadToolRegistry } from "../../claude-plugin/bin/swarm-mcp-server";
 
 type McpServerConfig = {
   command: string;
@@ -18,12 +19,20 @@ type McpConfig = {
 
 const PLUGIN_ROOT = resolve(process.cwd(), "claude-plugin");
 const MCP_CONFIG_PATH = resolve(PLUGIN_ROOT, ".mcp.json");
+const MCP_SERVER_PATH = resolve(PLUGIN_ROOT, "bin", "swarm-mcp-server.ts");
 
 /**
  * Reads the Claude plugin MCP config JSON from disk.
  */
 function readMcpConfig(): McpConfig {
   return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8")) as McpConfig;
+}
+
+/**
+ * Reads the Claude plugin MCP server entrypoint source.
+ */
+function readMcpServerSource(): string {
+  return readFileSync(MCP_SERVER_PATH, "utf-8");
 }
 
 describe("claude-plugin MCP config", () => {
@@ -45,5 +54,18 @@ describe("claude-plugin MCP config", () => {
     ]);
     expect(server.cwd).toBe("${CLAUDE_PLUGIN_ROOT}");
     expect(server.description).toBeTruthy();
+  });
+
+  it("loads runtime tools from the plugin dist bundle", () => {
+    const source = readMcpServerSource();
+
+    expect(source).toContain("../dist/index.js");
+  });
+
+  it("loads the swarm tool registry from the MCP entrypoint", async () => {
+    const tools = await loadToolRegistry();
+
+    expect(Object.keys(tools).length).toBeGreaterThan(0);
+    expect(tools).toHaveProperty("hive_ready");
   });
 });

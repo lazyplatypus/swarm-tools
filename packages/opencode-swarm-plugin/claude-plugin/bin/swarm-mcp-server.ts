@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { allTools } from "../../dist/index.js";
+import { existsSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
 type ToolContext = {
   sessionID: string;
@@ -15,6 +17,41 @@ type ToolDefinition = {
   args?: Record<string, unknown>;
   execute: (args: Record<string, unknown>, context: ToolContext) => Promise<unknown> | unknown;
 };
+
+/**
+ * Resolve the tool registry entrypoint for the MCP server.
+ */
+export function resolveToolRegistryPath(): string {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const pluginDistPath = resolve(currentDir, "../dist/index.js");
+  const packageDistPath = resolve(currentDir, "../../dist/index.js");
+
+  if (existsSync(pluginDistPath)) {
+    return pluginDistPath;
+  }
+
+  if (existsSync(packageDistPath)) {
+    return packageDistPath;
+  }
+
+  return resolve(currentDir, "../../src/index.ts");
+}
+
+/**
+ * Load the swarm tool registry for MCP execution.
+ */
+export async function loadToolRegistry(): Promise<Record<string, ToolDefinition>> {
+  const registryPath = resolveToolRegistryPath();
+  const moduleUrl = pathToFileURL(registryPath).href;
+  const toolsModule = await import(moduleUrl);
+  const tools = toolsModule.allTools ?? toolsModule.default?.allTools;
+
+  if (!tools) {
+    throw new Error(`[swarm-mcp] Tool registry missing at ${registryPath}`);
+  }
+
+  return tools as Record<string, ToolDefinition>;
+}
 
 /**
  * Build a tool execution context for MCP tool calls.
@@ -57,8 +94,8 @@ function formatToolOutput(result: unknown): string {
 /**
  * Register all swarm tools with the MCP server.
  */
-function registerTools(server: McpServer): void {
-  const tools = allTools as Record<string, ToolDefinition>;
+async function registerTools(server: McpServer): Promise<void> {
+  const tools = await loadToolRegistry();
 
   for (const [toolName, toolDef] of Object.entries(tools)) {
     server.registerTool(
@@ -90,14 +127,16 @@ async function main(): Promise<void> {
     version: process.env.SWARM_VERSION || "dev",
   });
 
-  registerTools(server);
+  await registerTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[swarm-mcp] Server started");
 }
 
-main().catch((error) => {
-  console.error("[swarm-mcp] Server failed", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error("[swarm-mcp] Server failed", error);
+    process.exit(1);
+  });
+}
