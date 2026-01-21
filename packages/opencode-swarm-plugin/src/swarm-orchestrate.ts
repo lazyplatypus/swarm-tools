@@ -883,11 +883,11 @@ export const swarm_status = tool({
  * Takes explicit agent identity since tools don't have persistent state.
  */
 export const swarm_progress = tool({
-  description: "Report progress on a subtask to coordinator",
+  description: "Report progress on a subtask to coordinator. REQUIRED: project_key, agent_name, bead_id, status. Call periodically (every 25% or when blocked) to keep coordinator informed. Use status='blocked' with message explaining the blocker if you're stuck.",
   args: {
-    project_key: tool.schema.string().describe("Project path"),
-    agent_name: tool.schema.string().describe("Your Agent Mail name"),
-    bead_id: tool.schema.string().describe("Subtask bead ID"),
+    project_key: tool.schema.string().describe("Project path (e.g., '/Users/name/project')"),
+    agent_name: tool.schema.string().describe("Your agent name from swarmmail_init"),
+    bead_id: tool.schema.string().describe("Task ID from your spawn prompt or hive cell"),
     status: tool.schema
       .enum(["in_progress", "blocked", "completed", "failed"])
       .describe("Current status"),
@@ -907,6 +907,29 @@ export const swarm_progress = tool({
       .describe("Files modified so far"),
   },
   async execute(args) {
+    // Validate required parameters with helpful error messages
+    const missing: string[] = [];
+    if (!args.bead_id) missing.push("bead_id");
+    if (!args.project_key) missing.push("project_key");
+    if (!args.agent_name) missing.push("agent_name");
+    if (!args.status) missing.push("status");
+
+    if (missing.length > 0) {
+      return JSON.stringify({
+        success: false,
+        error: `Missing required parameters: ${missing.join(", ")}`,
+        hint: "swarm_progress reports task progress to the coordinator.",
+        example: {
+          project_key: "/path/to/project",
+          agent_name: "your-agent-name",
+          bead_id: "your-task-id from spawn",
+          status: "in_progress",
+          progress_percent: 50,
+          message: "Completed X, working on Y",
+        },
+      }, null, 2);
+    }
+
     // Build progress report
     const progress: AgentProgress = {
       bead_id: args.bead_id,
@@ -1146,12 +1169,12 @@ export const swarm_broadcast = tool({
  */
 export const swarm_complete = tool({
   description:
-    "Mark subtask complete with Verification Gate. Runs typecheck and tests before allowing completion.",
+    "Mark subtask complete with Verification Gate. REQUIRED: project_key, agent_name, bead_id (from your task assignment), summary, start_time (Date.now() from when you started). Before calling: 1) hivemind_store your learnings, 2) list files_touched for verification. Runs typecheck/tests before finalizing.",
   args: {
-    project_key: tool.schema.string().describe("Project path"),
-    agent_name: tool.schema.string().describe("Your Agent Mail name"),
-    bead_id: tool.schema.string().describe("Subtask bead ID"),
-    summary: tool.schema.string().describe("Brief summary of work done"),
+    project_key: tool.schema.string().describe("Project path (e.g., '/Users/name/project')"),
+    agent_name: tool.schema.string().describe("Your agent name from swarmmail_init"),
+    bead_id: tool.schema.string().describe("Task ID from your spawn prompt or hive cell"),
+    summary: tool.schema.string().describe("What you accomplished (1-3 sentences)"),
     evaluation: tool.schema
       .string()
       .optional()
@@ -1189,6 +1212,31 @@ export const swarm_complete = tool({
       ),
   },
   async execute(args, _ctx) {
+    // Validate required parameters with helpful error messages
+    const missing: string[] = [];
+    if (!args.bead_id) missing.push("bead_id");
+    if (!args.project_key) missing.push("project_key");
+    if (!args.agent_name) missing.push("agent_name");
+    if (!args.summary) missing.push("summary");
+    if (args.start_time === undefined) missing.push("start_time");
+
+    if (missing.length > 0) {
+      return JSON.stringify({
+        success: false,
+        error: `Missing required parameters: ${missing.join(", ")}`,
+        hint: "swarm_complete marks a subtask as done. All parameters are required.",
+        example: {
+          project_key: "/path/to/project",
+          agent_name: "your-agent-name",
+          bead_id: "epic-id.subtask-num OR cell-id from hive",
+          summary: "Brief description of what you completed",
+          start_time: Date.now(),
+          files_touched: ["src/file1.ts", "src/file2.ts"],
+        },
+        tip: "The bead_id comes from swarm_spawn_subtask or hive_create. Check your task assignment for the correct ID.",
+      }, null, 2);
+    }
+
     // Extract epic ID early for error notifications and review gate
     const epicId = args.bead_id.includes(".")
       ? args.bead_id.split(".")[0]

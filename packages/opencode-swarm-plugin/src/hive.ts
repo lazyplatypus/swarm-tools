@@ -692,9 +692,9 @@ export const hive_create = tool({
  * Create an epic with subtasks in one atomic operation
  */
 export const hive_create_epic = tool({
-  description: "Create epic with subtasks in one atomic operation",
+  description: "Create epic with subtasks atomically. REQUIRED: epic_title, subtasks (array with {title, files?}). Use after swarm_validate_decomposition confirms your decomposition is valid. Each subtask should list files it will modify to enable parallel work without conflicts.",
   args: {
-    epic_title: tool.schema.string().describe("Epic title"),
+    epic_title: tool.schema.string().describe("Epic title (e.g., 'Implement user auth')"),
     epic_description: tool.schema
       .string()
       .optional()
@@ -740,6 +740,29 @@ export const hive_create_epic = tool({
       .describe("Recovery context from checkpoint compaction"),
   },
   async execute(args, ctx) {
+    // Validate required parameters with helpful error messages
+    const missing: string[] = [];
+    if (!args.epic_title) missing.push("epic_title");
+    if (!args.subtasks || args.subtasks.length === 0) missing.push("subtasks (array of subtask objects)");
+
+    if (missing.length > 0) {
+      return JSON.stringify({
+        success: false,
+        error: `Missing required parameters: ${missing.join(", ")}`,
+        hint: "hive_create_epic creates an epic with subtasks atomically.",
+        example: {
+          epic_title: "Implement user authentication",
+          epic_description: "Add login, logout, and session management",
+          subtasks: [
+            { title: "Create auth service", files: ["src/auth/service.ts"] },
+            { title: "Add login endpoint", files: ["src/api/login.ts"] },
+            { title: "Add session middleware", files: ["src/middleware/session.ts"] },
+          ],
+        },
+        tip: "Each subtask should have a title and optionally files it will modify. This helps with file reservation and parallel execution.",
+      }, null, 2);
+    }
+
     const validated = EpicCreateArgsSchema.parse(args);
     const projectKey = getHiveWorkingDirectory();
     const adapter = await getHiveAdapter(projectKey);
