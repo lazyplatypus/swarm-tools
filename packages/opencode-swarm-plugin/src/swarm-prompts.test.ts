@@ -90,9 +90,11 @@ describe("SUBTASK_PROMPT_V2", () => {
     test("Step 2 is hivemind_find (before skills)", () => {
       const step2Pos = SUBTASK_PROMPT_V2.indexOf("### Step 2:");
       const step3Pos = SUBTASK_PROMPT_V2.indexOf("### Step 3:");
-      const memoryFindPos = SUBTASK_PROMPT_V2.indexOf("hivemind_find");
-      const skillsPos = SUBTASK_PROMPT_V2.indexOf("skills_list");
-      
+      // Find hivemind_find AFTER Step 2 starts (may appear earlier in STOP box)
+      const memoryFindPos = SUBTASK_PROMPT_V2.indexOf("hivemind_find", step2Pos);
+      // Find skills_list AFTER Step 3 starts
+      const skillsPos = SUBTASK_PROMPT_V2.indexOf("skills_list", step3Pos);
+
       // Memory find should be in Step 2, before skills in Step 3
       expect(memoryFindPos).toBeGreaterThan(step2Pos);
       expect(memoryFindPos).toBeLessThan(step3Pos);
