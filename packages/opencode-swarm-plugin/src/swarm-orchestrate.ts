@@ -85,6 +85,11 @@ import {
 } from "./swarm-review";
 import { captureCoordinatorEvent, type EvalRecord } from "./eval-capture.js";
 import { formatResearcherPrompt } from "./swarm-prompts";
+import {
+  runVerificationGate,
+  type VerificationGateResult,
+  type VerificationStep,
+} from "./swarm-verify";
 
 // ============================================================================
 // Helper Functions
@@ -358,211 +363,10 @@ function formatProgressMessage(progress: AgentProgress): string {
 }
 
 // ============================================================================
-// Verification Gate
+// Verification Gate - Delegated to swarm-verify.ts
 // ============================================================================
-
-/**
- * Verification Gate result - tracks each verification step
- *
- * Based on the Gate Function from superpowers:
- * 1. IDENTIFY: What command proves this claim?
- * 2. RUN: Execute the FULL command (fresh, complete)
- * 3. READ: Full output, check exit code, count failures
- * 4. VERIFY: Does output confirm the claim?
- * 5. ONLY THEN: Make the claim
- */
-interface VerificationStep {
-  name: string;
-  command: string;
-  passed: boolean;
-  exitCode: number;
-  output?: string;
-  error?: string;
-  skipped?: boolean;
-  skipReason?: string;
-}
-
-interface VerificationGateResult {
-  passed: boolean;
-  steps: VerificationStep[];
-  summary: string;
-  blockers: string[];
-}
-
-
-/**
- * Run typecheck verification
- *
- * Attempts to run TypeScript type checking on the project.
- * Falls back gracefully if tsc is not available.
- */
-async function runTypecheckVerification(): Promise<VerificationStep> {
-  const step: VerificationStep = {
-    name: "typecheck",
-    command: "tsc --noEmit",
-    passed: false,
-    exitCode: -1,
-  };
-
-  try {
-    // Check if tsconfig.json exists in current directory
-    const tsconfigExists = await Bun.file("tsconfig.json").exists();
-    if (!tsconfigExists) {
-      step.skipped = true;
-      step.skipReason = "No tsconfig.json found";
-      step.passed = true; // Don't block if no TypeScript
-      return step;
-    }
-
-    const result = await Bun.$`tsc --noEmit`.quiet().nothrow();
-    step.exitCode = result.exitCode;
-    step.passed = result.exitCode === 0;
-
-    if (!step.passed) {
-      step.error = result.stderr.toString().slice(0, 1000); // Truncate for context
-      step.output = result.stdout.toString().slice(0, 1000);
-    }
-  } catch (error) {
-    step.skipped = true;
-    step.skipReason = `tsc not available: ${error instanceof Error ? error.message : String(error)}`;
-    step.passed = true; // Don't block if tsc unavailable
-  }
-
-  return step;
-}
-
-/**
- * Run test verification for specific files
- *
- * Attempts to find and run tests related to the touched files.
- * Uses common test patterns (*.test.ts, *.spec.ts, __tests__/).
- */
-async function runTestVerification(
-  filesTouched: string[],
-): Promise<VerificationStep> {
-  const step: VerificationStep = {
-    name: "tests",
-    command: "bun test <related-files>",
-    passed: false,
-    exitCode: -1,
-  };
-
-  if (filesTouched.length === 0) {
-    step.skipped = true;
-    step.skipReason = "No files touched";
-    step.passed = true;
-    return step;
-  }
-
-  // Find test files related to touched files
-  const testPatterns: string[] = [];
-  for (const file of filesTouched) {
-    // Skip if already a test file
-    if (file.includes(".test.") || file.includes(".spec.")) {
-      testPatterns.push(file);
-      continue;
-    }
-
-    // Look for corresponding test file
-    const baseName = file.replace(/\.(ts|tsx|js|jsx)$/, "");
-    testPatterns.push(`${baseName}.test.ts`);
-    testPatterns.push(`${baseName}.test.tsx`);
-    testPatterns.push(`${baseName}.spec.ts`);
-  }
-
-  // Check if any test files exist
-  const existingTests: string[] = [];
-  for (const pattern of testPatterns) {
-    try {
-      const exists = await Bun.file(pattern).exists();
-      if (exists) {
-        existingTests.push(pattern);
-      }
-    } catch {
-      // File doesn't exist, skip
-    }
-  }
-
-  if (existingTests.length === 0) {
-    step.skipped = true;
-    step.skipReason = "No related test files found";
-    step.passed = true;
-    return step;
-  }
-
-  try {
-    step.command = `bun test ${existingTests.join(" ")}`;
-    const result = await Bun.$`bun test ${existingTests}`.quiet().nothrow();
-    step.exitCode = result.exitCode;
-    step.passed = result.exitCode === 0;
-
-    if (!step.passed) {
-      step.error = result.stderr.toString().slice(0, 1000);
-      step.output = result.stdout.toString().slice(0, 1000);
-    }
-  } catch (error) {
-    step.skipped = true;
-    step.skipReason = `Test runner failed: ${error instanceof Error ? error.message : String(error)}`;
-    step.passed = true; // Don't block if test runner unavailable
-  }
-
-  return step;
-}
-
-/**
- * Run the full Verification Gate
- *
- * Implements the Gate Function (IDENTIFY → RUN → READ → VERIFY → CLAIM):
- * 1. Typecheck
- * 2. Tests for touched files
- *
- * NOTE: Bug scanning was removed in v0.31 - it was slowing down completion
- * without providing proportional value.
- *
- * All steps must pass (or be skipped with valid reason) to proceed.
- */
-async function runVerificationGate(
-  filesTouched: string[],
-  _skipUbs: boolean = false, // Kept for backward compatibility, now ignored
-): Promise<VerificationGateResult> {
-  const steps: VerificationStep[] = [];
-  const blockers: string[] = [];
-
-  // Step 1: Typecheck
-  const typecheckStep = await runTypecheckVerification();
-  steps.push(typecheckStep);
-  if (!typecheckStep.passed && !typecheckStep.skipped) {
-    blockers.push(
-      `Typecheck failed: ${typecheckStep.error?.slice(0, 100) || "type errors found"}. Try: Run 'tsc --noEmit' to see full errors, check tsconfig.json configuration, or fix reported type errors in modified files.`,
-    );
-  }
-
-  // Step 3: Tests
-  const testStep = await runTestVerification(filesTouched);
-  steps.push(testStep);
-  if (!testStep.passed && !testStep.skipped) {
-    blockers.push(
-      `Tests failed: ${testStep.error?.slice(0, 100) || "test failures"}. Try: Run 'bun test ${testStep.command.split(" ").slice(2).join(" ")}' to see full output, check test assertions, or fix failing tests in modified files.`,
-    );
-  }
-
-  // Build summary
-  const passedCount = steps.filter((s) => s.passed).length;
-  const skippedCount = steps.filter((s) => s.skipped).length;
-  const failedCount = steps.filter((s) => !s.passed && !s.skipped).length;
-
-  const summary =
-    failedCount === 0
-      ? `Verification passed: ${passedCount} checks passed, ${skippedCount} skipped`
-      : `Verification FAILED: ${failedCount} checks failed, ${passedCount} passed, ${skippedCount} skipped`;
-
-  return {
-    passed: failedCount === 0,
-    steps,
-    summary,
-    blockers,
-  };
-}
+// Verification logic moved to swarm-verify.ts to keep coordinator lean.
+// Import runVerificationGate and types from there.
 
 /**
  * Classify failure based on error message heuristics
