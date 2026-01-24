@@ -29,13 +29,18 @@
 import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import type { SwarmDb } from "../db/client.js";
 import { memories } from "../db/schema/memory.js";
+import { EMBEDDING_DIM } from "./ollama.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Embedding dimension for mxbai-embed-large */
-export const EMBEDDING_DIM = 1024;
+/**
+ * Embedding dimension for configured Ollama model.
+ * Auto-detected from OLLAMA_MODEL env var or defaults to 1024 (mxbai-embed-large).
+ * Can be overridden via OLLAMA_EMBED_DIM env var.
+ */
+export { EMBEDDING_DIM };
 
 /** Memory data structure */
 export interface Memory {
