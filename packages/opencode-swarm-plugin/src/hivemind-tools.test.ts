@@ -18,86 +18,28 @@
  * 6. Error handling and edge cases
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { hivemindTools, resetHivemindCache } from "./hivemind-tools";
 import { closeAllSwarmMail, createInMemorySwarmMail } from "swarm-mail";
-
-// ============================================================================
-// Deterministic fake embedding for fast, reliable tests
-// ============================================================================
-
-/**
- * Generate a deterministic 1024-dim embedding from text using bag-of-words hashing.
- * Tokens that overlap between texts produce overlapping dimensions → positive cosine similarity.
- * This replaces real Ollama calls (network + GPU) with pure computation (~0ms).
- */
-function fakeDeterministicEmbedding(text: string): number[] {
-	const dim = 1024;
-	const embedding = new Float64Array(dim);
-
-	const tokens = text.toLowerCase().split(/[\s\W]+/).filter(Boolean);
-	for (const token of tokens) {
-		let hash = 0;
-		for (let i = 0; i < token.length; i++) {
-			hash = ((hash << 5) - hash + token.charCodeAt(i)) | 0;
-		}
-		for (let j = 0; j < 4; j++) {
-			const idx = Math.abs((hash + j * 257) % dim);
-			embedding[idx] += 1.0;
-		}
-	}
-
-	// Normalize to unit vector for proper cosine similarity
-	let norm = 0;
-	for (let i = 0; i < dim; i++) norm += embedding[i] * embedding[i];
-	norm = Math.sqrt(norm);
-	if (norm > 0) {
-		for (let i = 0; i < dim; i++) embedding[i] /= norm;
-	}
-
-	return Array.from(embedding);
-}
+import { server } from "./test-utils/msw-server";
 
 describe("hivemind tools integration", () => {
-	let originalFetch: typeof globalThis.fetch;
-
 	beforeAll(async () => {
-		// Mock Ollama API calls to avoid real network/GPU embedding generation.
-		// This makes tests ~50x faster and deterministic.
-		originalFetch = globalThis.fetch;
-		globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-
-			// Intercept Ollama embedding requests
-			if (url.includes("/api/embeddings")) {
-				const body = JSON.parse((init?.body as string) || "{}");
-				const embedding = fakeDeterministicEmbedding(body.prompt || "");
-				return new Response(JSON.stringify({ embedding }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-
-			// Intercept Ollama health check (tags endpoint)
-			if (url.includes("/api/tags")) {
-				return new Response(
-					JSON.stringify({ models: [{ name: "mxbai-embed-large" }] }),
-					{ status: 200, headers: { "Content-Type": "application/json" } },
-				);
-			}
-
-			// Pass through all other requests
-			return originalFetch(input, init);
-		};
+		// MSW intercepts Ollama API calls at the network level.
+		// No globalThis.fetch mutation needed.
+		server.listen({ onUnhandledRequest: "bypass" });
 
 		// Create in-memory database for tests
 		// This ensures tests are isolated and don't affect real data
 		await createInMemorySwarmMail("hivemind-test");
 	});
 
+	afterEach(() => {
+		server.resetHandlers();
+	});
+
 	afterAll(async () => {
-		// Restore original fetch before cleanup
-		globalThis.fetch = originalFetch;
+		server.close();
 		resetHivemindCache();
 		await closeAllSwarmMail();
 	});
