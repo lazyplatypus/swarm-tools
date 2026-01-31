@@ -596,10 +596,11 @@ const swarmPlugin = {
           console.log(`[swarm-plugin] Querying hivemind for: ${prompt.slice(0, 50)}...`);
           const result = swarmMemory("find", { query: prompt, limit: cfg.maxRecallResults });
           console.log(`[swarm-plugin] Hivemind result: success=${result.success}`);
-          if (!result.success || !result.data) return;
+          if (!result.success) return;
 
-          const data = result.data as { results?: MemoryResult[] };
-          const results = (data.results || []).filter((r) => r.score >= cfg.minScore);
+          // swarm memory find returns { success, results } not { success, data: { results } }
+          const parsed = result as unknown as { success: boolean; results?: MemoryResult[] };
+          const results = (parsed.results || []).filter((r) => r.score >= cfg.minScore);
           console.log(`[swarm-plugin] Found ${results.length} memories above ${cfg.minScore} threshold`);
           if (results.length === 0) return;
 
