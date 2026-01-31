@@ -39,8 +39,10 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/provider": "^3.0.6",
     "@libsql/client": "^0.15.15",
-    "ai": "6.0.0-beta.150",
+    "ai": "^6.0.64",
+    "ai-sdk-ollama": "^3.3.0",
     "chokidar": "^5.0.0",
     "debug": "^4.4.3",
     "drizzle-orm": "^0.41.0",

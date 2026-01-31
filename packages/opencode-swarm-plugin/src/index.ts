@@ -49,6 +49,7 @@ import { mandateTools } from "./mandates";
 import { hivemindTools } from "./hivemind-tools";
 import { observabilityTools } from "./observability-tools";
 import { researchTools } from "./swarm-research";
+import { queueTools } from "./queue-tools";
 // NOTE: evalTools removed from main bundle - evalite is a devDependency
 // Use `bunx evalite run` directly for running evals
 // import { evalTools } from "./eval-runner";
@@ -182,6 +183,7 @@ const SwarmPlugin: Plugin = async (
       ...hivemindTools,
       ...observabilityTools,
       ...researchTools,
+      ...queueTools,
       // evalTools removed - evalite is devDependency, use `bunx evalite run` directly
       ...contributorTools,
     },
@@ -683,6 +685,7 @@ export const allTools = {
   ...hivemindTools,
   ...observabilityTools,
   ...researchTools,
+  ...queueTools,
   ...contributorTools,
 } as const;
 
@@ -1100,6 +1103,36 @@ export {
   type DiscoveredTool,
   type VersionInfo,
 } from "./swarm-research";
+
+/**
+ * Re-export queue-tools module
+ *
+ * BullMQ-based queue management tools for background job processing.
+ *
+ * Includes:
+ * - queueTools - All queue tools (submit, status, list, cancel)
+ * - queue_submit - Submit job with type, payload, priority, delay, attempts
+ * - queue_status - Get job status by ID
+ * - queue_list - List jobs by state (waiting, active, completed, failed, delayed)
+ * - queue_cancel - Cancel/remove job by ID
+ * - resetQueueCache - Reset queue cache (for testing)
+ *
+ * Features:
+ * - Submit jobs with priority, delay, and retry options
+ * - Query job status and progress
+ * - List jobs by state with metrics
+ * - Cancel jobs in any state
+ * - Event emission for observability
+ * - Graceful connection management
+ */
+export {
+  queueTools,
+  queue_submit,
+  queue_status,
+  queue_list,
+  queue_cancel,
+  resetQueueCache,
+} from "./queue-tools";
 
 /**
  * Re-export swarm-validation module

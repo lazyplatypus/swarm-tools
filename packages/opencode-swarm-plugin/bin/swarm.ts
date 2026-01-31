@@ -92,6 +92,7 @@ import { tree } from "./commands/tree.js";
 import { session } from "./commands/session.js";
 import { log } from "./commands/log.js";
 import { status } from "./commands/status.js";
+import { queue } from "./commands/queue.js";
 import {
   querySwarmHistory,
   formatSwarmHistory,
@@ -4376,6 +4377,7 @@ ${cyan("Commands:")}
   swarm export    Export events (--format otlp/csv/json, --epic, --output)
   swarm tree      Visualize cell hierarchy as ASCII tree (--status, --epic, --json)
   swarm session   Manage work sessions with handoff notes (start, end, status, history)
+  swarm queue     Manage distributed job queue (submit, status, list, worker)
   swarm update    Update to latest version
   swarm version   Show version and banner
   swarm tool      Execute a tool (for plugin wrapper)
@@ -4395,7 +4397,10 @@ ${cyan("Cell Management:")}
   swarm cells --json                   Raw JSON output (array, no wrapper)
 
 ${cyan("Memory Management (Hivemind):")}
-  swarm memory store <info> [--tags <tags>]              Store a learning/memory
+  swarm memory store <info> [options]                    Store a learning/memory
+    --tags <tags>       Comma-separated tags
+    --extract-entities  Extract and link entities (uses local LLM)
+    --debug             Show debug logging
   swarm memory find <query> [--limit <n>]                Search all memories (semantic + FTS)
   swarm memory get <id>                                  Get specific memory by ID
   swarm memory remove <id>                               Delete outdated/incorrect memory
@@ -4472,6 +4477,17 @@ ${cyan("Session Management (Chainlink-inspired):")}
   swarm session end [--notes "..."]    End session with handoff notes for next session
   swarm session status                 Show current session info
   swarm session history [--limit n]    Show session history (default: 10)
+
+${cyan("Queue Management (BullMQ + Redis):")}
+  swarm queue submit <type> [options]  Submit job to distributed queue
+    --payload '{...}'                  Job payload (JSON)
+    --priority <n>                     Priority (lower = higher, default: 5)
+    --delay <ms>                       Delay before processing (default: 0)
+  swarm queue status <jobId>           Show job status
+  swarm queue list [--state <state>]   List jobs and metrics (waiting|active|completed|failed|delayed)
+  swarm queue worker [options]         Start worker to process jobs
+    --concurrency <n>                  Concurrent jobs (default: 5)
+    --sandbox                          Enable resource limits via systemd
 
 ${cyan("Usage in OpenCode:")}
   /swarm "Add user authentication with OAuth"
@@ -7394,6 +7410,8 @@ async function capture() {
  */
 function parseMemoryArgs(subcommand: string, args: string[]): {
   json: boolean;
+  debug: boolean;
+  extractEntities: boolean;
   info?: string;
   query?: string;
   id?: string;
@@ -7405,6 +7423,8 @@ function parseMemoryArgs(subcommand: string, args: string[]): {
   direction?: string;
 } {
   let json = false;
+  let debug = false;
+  let extractEntities = false;
   let info: string | undefined;
   let query: string | undefined;
   let id: string | undefined;
@@ -7432,6 +7452,10 @@ function parseMemoryArgs(subcommand: string, args: string[]): {
     const arg = args[i];
     if (arg === "--json") {
       json = true;
+    } else if (arg === "--debug" || arg === "-v" || arg === "--verbose") {
+      debug = true;
+    } else if (arg === "--extract-entities" || arg === "-e") {
+      extractEntities = true;
     } else if (arg === "--tags" && i + 1 < args.length) {
       tags = args[++i];
     } else if (arg === "--limit" && i + 1 < args.length) {
@@ -7446,7 +7470,7 @@ function parseMemoryArgs(subcommand: string, args: string[]): {
     }
   }
 
-  return { json, info, query, id, name, tags, limit, collection, type, direction };
+  return { json, debug, extractEntities, info, query, id, name, tags, limit, collection, type, direction };
 }
 
 /**
@@ -7477,21 +7501,20 @@ async function memory() {
     // Get database instance using getDb from swarm-mail
     // This returns a drizzle instance (SwarmDb) that memory adapter expects
     const { getDb } = await import("swarm-mail");
-    
-    // Calculate DB path (same logic as libsql.convenience.ts)
-    const tempDirName = getLibSQLProjectTempDirName(projectPath);
-    const tempDir = join(tmpdir(), tempDirName);
-    
-    // Ensure temp directory exists
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
+
+    // Use single global DB: ~/.config/swarm-tools/swarm.db
+    const globalDbDir = join(homedir(), ".config", "swarm-tools");
+
+    // Ensure global DB directory exists
+    if (!existsSync(globalDbDir)) {
+      mkdirSync(globalDbDir, { recursive: true });
     }
-    
-    const dbPath = join(tempDir, "streams.db");
-    
+
+    const dbPath = join(globalDbDir, "swarm.db");
+
     // Convert to file:// URL (required by libSQL)
     const dbUrl = `file://${dbPath}`;
-    
+
     const db = await getDb(dbUrl);
     
     // Create memory adapter with default Ollama config
@@ -7504,22 +7527,38 @@ async function memory() {
     switch (subcommand) {
       case "store": {
         if (!parsed.info) {
-          console.error("Usage: swarm memory store <information> [--tags <tags>]");
+          console.error("Usage: swarm memory store <information> [--tags <tags>] [--extract-entities] [--debug]");
           process.exit(1);
+        }
+
+        if (parsed.debug) {
+          console.log("[DEBUG] Store options:", {
+            content: parsed.info.substring(0, 50) + "...",
+            tags: parsed.tags,
+            collection: parsed.collection || "default",
+            extractEntities: parsed.extractEntities,
+          });
         }
 
         const result = await adapter.store(parsed.info, {
           tags: parsed.tags,
           collection: parsed.collection || "default",
+          extractEntities: parsed.extractEntities,
         });
 
         if (parsed.json) {
-          console.log(JSON.stringify({ success: true, id: result.id }));
+          console.log(JSON.stringify({ success: true, id: result.id, autoTags: result.autoTags, links: result.links }));
         } else {
           p.intro("swarm memory store");
           p.log.success(`Stored memory: ${result.id}`);
           if (result.autoTags) {
             p.log.message(`Auto-tags: ${result.autoTags.tags.join(", ")}`);
+          }
+          if (result.links && result.links.length > 0) {
+            p.log.message(`Linked to ${result.links.length} related memories`);
+          }
+          if (parsed.extractEntities) {
+            p.log.message(`Entity extraction: enabled`);
           }
           p.outro("Done");
         }
@@ -8067,6 +8106,9 @@ switch (command) {
     break;
   case "session":
     await session();
+    break;
+  case "queue":
+    await queue();
     break;
   case "status":
     await status(process.argv.slice(3));

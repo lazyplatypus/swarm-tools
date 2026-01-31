@@ -10,7 +10,7 @@
  * @module memory/taxonomy-extraction
  */
 
-import { generateText, Output } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { Client } from "@libsql/client";
 import type { ExtractedEntity } from "./entity-extraction.js";
@@ -75,11 +75,12 @@ const TaxonomyExtractionSchema = z.object({
  *
  * @param content - Text content for context
  * @param entities - Extracted entities to analyze relationships between
- * @param config - Model configuration (model name + API key)
+ * @param config - Model configuration (model name + API key OR LanguageModel instance)
  * @returns Extracted taxonomy relationships
  *
  * @example
  * ```typescript
+ * // With model string (Anthropic via AI Gateway)
  * const result = await extractTaxonomy(
  *   "React is a library. React Hooks like useState are part of React.",
  *   [
@@ -89,13 +90,20 @@ const TaxonomyExtractionSchema = z.object({
  *   ],
  *   { model: "anthropic/claude-haiku-4-5", apiKey: process.env.API_KEY }
  * );
- * // { relationships: [{ entityName: "React Hooks", relatedEntityName: "React", relationshipType: "narrower" }] }
+ *
+ * // With Ollama LanguageModel instance
+ * import { getOllamaExtractionModel } from "./ollama-llm.js";
+ * const result = await extractTaxonomy(
+ *   "...",
+ *   entities,
+ *   { languageModel: getOllamaExtractionModel() }
+ * );
  * ```
  */
 export async function extractTaxonomy(
   content: string,
   entities: ExtractedEntity[],
-  config: { model: string; apiKey?: string }
+  config: { model?: string; apiKey?: string; languageModel?: LanguageModel }
 ): Promise<TaxonomyExtractionResult> {
   // Skip if fewer than 2 entities (need at least 2 for relationships)
   if (entities.length < 2) {
@@ -103,14 +111,20 @@ export async function extractTaxonomy(
   }
 
   try {
-    const headers = config.apiKey
-      ? { Authorization: `Bearer ${config.apiKey}` }
-      : undefined;
+    // Support both string model names (AI Gateway) and LanguageModel instances (Ollama)
+    const modelConfig = config.languageModel
+      ? { model: config.languageModel as LanguageModel }
+      : {
+          model: config.model!,
+          headers: config.apiKey
+            ? { Authorization: `Bearer ${config.apiKey}` }
+            : undefined,
+        };
 
     const entityList = entities.map((e) => e.name).join(", ");
 
     const { output } = await generateText({
-      model: config.model,
+      ...modelConfig,
       prompt: `Given the following text and list of entities, identify SKOS taxonomic relationships between them.
 
 SKOS Relationship Types:
@@ -130,7 +144,6 @@ Entities: ${entityList}`,
       output: Output.object({
         schema: TaxonomyExtractionSchema,
       }),
-      ...(headers && { headers }),
     });
 
     return output as TaxonomyExtractionResult;

@@ -16,7 +16,7 @@
  * @module memory/entity-extraction
  */
 
-import { generateText, Output } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { Client } from "@libsql/client";
 
@@ -126,31 +126,42 @@ const ExtractionSchema = z.object({
  * Graceful degradation: returns empty arrays on LLM errors.
  *
  * @param content - Text content to extract from
- * @param config - Model configuration (model name + API key)
+ * @param config - Model configuration (model name + API key OR LanguageModel instance)
  * @returns Extracted entities and relationships
  *
  * @example
  * ```typescript
+ * // With model string (Anthropic via AI Gateway)
  * const result = await extractEntitiesAndRelationships(
  *   "Joel prefers TypeScript for Next.js",
  *   { model: "anthropic/claude-haiku-4-5", apiKey: process.env.API_KEY }
  * );
- * // { entities: [...], relationships: [...] }
+ *
+ * // With Ollama LanguageModel instance
+ * import { getOllamaExtractionModel } from "./ollama-llm.js";
+ * const result = await extractEntitiesAndRelationships(
+ *   "Joel prefers TypeScript for Next.js",
+ *   { languageModel: getOllamaExtractionModel() }
+ * );
  * ```
  */
 export async function extractEntitiesAndRelationships(
   content: string,
-  config: { model: string; apiKey?: string }
+  config: { model?: string; apiKey?: string; languageModel?: LanguageModel }
 ): Promise<ExtractionResult> {
   try {
-    // AI Gateway reads AI_GATEWAY_API_KEY from env automatically
-    // Only pass headers if explicitly provided (for testing)
-    const headers = config.apiKey
-      ? { Authorization: `Bearer ${config.apiKey}` }
-      : undefined;
+    // Support both string model names (AI Gateway) and LanguageModel instances (Ollama)
+    const modelConfig = config.languageModel
+      ? { model: config.languageModel as LanguageModel }
+      : {
+          model: config.model!,
+          headers: config.apiKey
+            ? { Authorization: `Bearer ${config.apiKey}` }
+            : undefined,
+        };
 
     const { output } = await generateText({
-      model: config.model,
+      ...modelConfig,
       prompt: `Extract named entities and relationships from the following text.
 
 Entities should be people, projects, technologies, or concepts mentioned.
@@ -166,7 +177,6 @@ Text: ${content}`,
       output: Output.object({
         schema: ExtractionSchema,
       }),
-      ...(headers && { headers }),
     });
 
     return output as ExtractionResult;
