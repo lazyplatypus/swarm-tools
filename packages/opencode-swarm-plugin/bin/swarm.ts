@@ -58,6 +58,7 @@ import {
   consolidateDatabases,
   getGlobalDbPath,
 } from "swarm-mail";
+import { createMemoryAdapter } from "../src/memory";
 import { execSync, spawn } from "child_process";
 import { tmpdir } from "os";
 
@@ -612,6 +613,7 @@ interface ClaudeHookInput {
   cwd?: string;
   session?: { id?: string };
   metadata?: { cwd?: string };
+  prompt?: string; // UserPromptSubmit includes the user's prompt text
 }
 
 /**
@@ -3126,6 +3128,45 @@ async function claudeUserPrompt() {
     if (!session) return;
 
     const contextLines: string[] = [];
+
+    // Always inject current timestamp for temporal awareness
+    const now = new Date();
+    const timestamp = now.toLocaleString("en-US", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    contextLines.push(`**Now**: ${timestamp}`);
+
+    // Semantic memory recall - search hivemind for relevant context
+    if (input.prompt && input.prompt.trim().length > 10) {
+      try {
+        const memoryAdapter = await createMemoryAdapter(db);
+        const findResult = await memoryAdapter.find({ query: input.prompt, limit: 3 });
+        const memories = findResult.results;
+
+        if (memories && memories.length > 0) {
+          // Only include high-confidence matches (score > 0.5)
+          const relevant = memories.filter((m: { score?: number }) => (m.score ?? 0) > 0.5);
+          if (relevant.length > 0) {
+            const memorySnippets = relevant
+              .slice(0, 2) // Max 2 memories to keep context light
+              .map((m: { content?: string; information?: string }) => {
+                const content = m.content || m.information || "";
+                return content.length > 200 ? content.slice(0, 200) + "..." : content;
+              })
+              .join(" | ");
+            contextLines.push(`**Recall**: ${memorySnippets}`);
+          }
+        }
+      } catch {
+        // Memory recall is optional - don't fail the hook
+      }
+    }
 
     // Current active cell (most relevant context)
     if (session.active_cell_id) {
