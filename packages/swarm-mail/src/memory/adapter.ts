@@ -341,10 +341,15 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
   };
 
   /**
-   * Parse tags string into array
+   * Parse tags into array - handles both string and array inputs
    */
-  const parseTags = (tags?: string): string[] | undefined => {
+  const parseTags = (tags?: string | string[]): string[] | undefined => {
     if (!tags) return undefined;
+    // Handle array input (defensive - API expects string but be flexible)
+    if (Array.isArray(tags)) {
+      return tags.map((t) => String(t).trim()).filter(Boolean);
+    }
+    // Handle string input (comma-separated)
     return tags.split(",").map((t) => t.trim()).filter(Boolean);
   };
 
@@ -484,8 +489,17 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
     memoryId: string,
     content: string
   ): Promise<void> => {
+    const DEBUG = process.env.SWARM_DEBUG === "1" || process.env.DEBUG === "1";
+    const log = (msg: string, data?: unknown) => {
+      if (DEBUG) console.log(`[Entity Extraction] ${msg}`, data ?? "");
+    };
+
+    log("Starting extraction for memory:", memoryId);
+    log("Content preview:", content.substring(0, 100) + "...");
+
     try {
       // Import extraction functions (dynamic to avoid circular deps)
+      log("Importing extraction functions...");
       const {
         extractEntitiesAndRelationships,
         storeEntities,
@@ -507,19 +521,34 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         console.warn("No libSQL client available for entity extraction");
         return;
       }
+      log("Got libSQL client");
 
       // Extract entities and relationships using LLM
-      // Uses AI_GATEWAY_API_KEY from env
+      // Use Ollama qwen2.5:3b for local extraction
+      log("Getting Ollama extraction model...");
+      const { getOllamaExtractionModel } = await import("./ollama-llm.js");
+      const model = getOllamaExtractionModel(config.ollamaHost);
+      log("Model configured:", { host: config.ollamaHost });
+
+      log("Calling extractEntitiesAndRelationships (this may take a moment)...");
       const extraction = await extractEntitiesAndRelationships(content, {
-        model: "anthropic/claude-haiku-4-5",
+        languageModel: model,
+      });
+      log("Extraction complete:", {
+        entityCount: extraction.entities.length,
+        relationshipCount: extraction.relationships.length,
       });
 
       // Graceful degradation: if LLM returns empty, just return (no crash)
       if (extraction.entities.length === 0) {
+        log("No entities found, skipping storage");
         return;
       }
 
+      log("Entities found:", extraction.entities.map(e => `${e.name} (${e.entityType})`));
+
       // Store entities (with deduplication)
+      log("Storing entities to database...");
       const storedEntities = await storeEntities(
         extraction.entities.map((e) => ({
           name: e.name,
@@ -527,18 +556,22 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         })),
         libsqlClient
       );
+      log(`Stored ${storedEntities.length} entities:`, storedEntities.map(e => e.id));
 
       // Link memory to extracted entities via junction table
+      log("Linking memory to entities...");
       await linkMemoryToEntities(
         memoryId,
         storedEntities.map((e) => e.id),
         libsqlClient
       );
+      log("Memory linked to entities");
 
       // Build entity ID lookup map (name -> id)
       const entityIdMap = new Map(storedEntities.map((e) => [e.name.toLowerCase(), e.id]));
 
       // Store relationships (need to resolve names to IDs first)
+      log("Processing relationships...");
       const relationshipsToStore = extraction.relationships
         .map((rel) => {
           const subjectId = entityIdMap.get(rel.subjectName.toLowerCase());
@@ -546,6 +579,7 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
 
           if (!subjectId || !objectId) {
             // Skip relationships where entities weren't extracted
+            log(`Skipping relationship: ${rel.subjectName} -> ${rel.objectName} (missing entity)`);
             return null;
           }
 
@@ -559,16 +593,19 @@ export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
         .filter((r): r is NonNullable<typeof r> => r !== null);
 
       if (relationshipsToStore.length > 0) {
+        log(`Storing ${relationshipsToStore.length} relationships...`);
         await storeRelationships(relationshipsToStore, memoryId, libsqlClient);
+        log("Relationships stored");
       }
 
       // Extract and store SKOS taxonomy relationships
       try {
+        log(`[Taxonomy] Extracting relationships for ${storedEntities.length} entities`);
         console.log(`[Taxonomy] Extracting relationships for ${storedEntities.length} entities`);
 
+        const { getOllamaExtractionModel } = await import("./ollama-llm.js");
         const taxonomyResult = await extractTaxonomy(content, extraction.entities, {
-          model: "anthropic/claude-haiku-4-5",
-          apiKey: process.env.AI_GATEWAY_API_KEY,
+          languageModel: getOllamaExtractionModel(config.ollamaHost),
         });
 
         if (taxonomyResult.relationships.length > 0) {

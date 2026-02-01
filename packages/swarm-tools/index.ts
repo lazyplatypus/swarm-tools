@@ -438,6 +438,69 @@ const SWARM_TOOLS = [
       additionalProperties: false,
     },
   },
+
+  // Queue management - BullMQ background job processing
+  {
+    name: "queue_submit",
+    label: "Queue Submit",
+    description: "Submit a job to the background queue with type, payload, and options (priority, delay, attempts). Returns job ID for tracking.",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", description: "Job type identifier (required)" },
+        payload: { type: "string", description: "Job payload as JSON string (required)" },
+        queue_name: { type: "string", description: "Queue name (default: 'swarm')" },
+        priority: { type: "number", description: "Job priority (lower = higher priority, default: 0)" },
+        delay: { type: "number", description: "Delay in milliseconds before job can be processed" },
+        attempts: { type: "number", description: "Number of retry attempts on failure (default: 3)" },
+        remove_on_complete: { type: "boolean", description: "Remove job after successful completion (default: false)" },
+      },
+      required: ["type", "payload"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "queue_status",
+    label: "Queue Status",
+    description: "Get status of a job by ID. Returns job state, progress, data, and error info if failed.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "Job ID to query (required)" },
+        queue_name: { type: "string", description: "Queue name (default: 'swarm')" },
+      },
+      required: ["job_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "queue_list",
+    label: "Queue List",
+    description: "List jobs by state (waiting, active, completed, failed, delayed). Returns job IDs, types, and basic info.",
+    parameters: {
+      type: "object",
+      properties: {
+        state: { type: "string", description: "Job state filter: waiting, active, completed, failed, delayed (default: all)" },
+        queue_name: { type: "string", description: "Queue name (default: 'swarm')" },
+        limit: { type: "number", description: "Maximum number of jobs to return (default: 10)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "queue_cancel",
+    label: "Queue Cancel",
+    description: "Cancel and remove a job by ID. Works for jobs in any state (waiting, delayed, active, completed, failed).",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "Job ID to cancel (required)" },
+        queue_name: { type: "string", description: "Queue name (default: 'swarm')" },
+      },
+      required: ["job_id"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 // ============================================================================
