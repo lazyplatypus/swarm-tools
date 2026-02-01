@@ -699,3 +699,153 @@ describe("edge cases", () => {
     expect(skills.has("empty-skill")).toBe(false);
   });
 });
+
+// ============================================================================
+// Tests: skills_reload
+// ============================================================================
+
+import { skills_reload } from "./skills";
+
+describe("skills_reload", () => {
+  beforeEach(() => {
+    cleanupTestSkillsDir();
+    setupTestSkillsDir();
+    setSkillsProjectDirectory(TEST_DIR);
+    invalidateSkillsCache();
+  });
+
+  afterEach(() => {
+    cleanupTestSkillsDir();
+    invalidateSkillsCache();
+  });
+
+  it("clears cache and reloads skills", async () => {
+    // First discovery to populate cache
+    const skills1 = await discoverSkills();
+    expect(skills1.has("test-skill")).toBe(true);
+    expect(skills1.size).toBeGreaterThanOrEqual(2);
+
+    // Call skills_reload
+    const result = await skills_reload.execute({});
+    const parsed = JSON.parse(result);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.reloaded).toBeGreaterThanOrEqual(2);
+    expect(parsed.skills).toBeInstanceOf(Array);
+
+    // Verify test-skill is in the reloaded list
+    const testSkill = parsed.skills.find((s: any) => s.name === "test-skill");
+    expect(testSkill).toBeDefined();
+    expect(testSkill.description).toBe("A test skill for unit testing");
+  });
+
+  it("picks up newly created skills", async () => {
+    // Initial load
+    const skills1 = await discoverSkills();
+    const initialCount = skills1.size;
+
+    // Create a new skill file
+    const newSkillDir = join(SKILLS_DIR, "new-skill");
+    mkdirSync(newSkillDir, { recursive: true });
+    writeFileSync(
+      join(newSkillDir, "SKILL.md"),
+      `---
+name: new-skill
+description: A newly created skill
+---
+
+# New Skill
+
+Test content.
+`,
+    );
+
+    // Reload skills
+    const result = await skills_reload.execute({});
+    const parsed = JSON.parse(result);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.reloaded).toBe(initialCount + 1);
+
+    // Verify new skill is discovered
+    const newSkill = parsed.skills.find((s: any) => s.name === "new-skill");
+    expect(newSkill).toBeDefined();
+    expect(newSkill.description).toBe("A newly created skill");
+  });
+
+  it("reflects modifications to existing skills", async () => {
+    // Initial load
+    await discoverSkills();
+
+    // Modify an existing skill
+    const modifiedContent = `---
+name: test-skill
+description: Updated description for testing
+tags:
+  - testing
+  - modified
+tools:
+  - Read
+  - Write
+---
+
+# Test Skill (Modified)
+
+This skill has been modified.
+`;
+    writeFileSync(join(SKILLS_DIR, "test-skill", "SKILL.md"), modifiedContent);
+
+    // Reload skills
+    const result = await skills_reload.execute({});
+    const parsed = JSON.parse(result);
+
+    expect(parsed.success).toBe(true);
+
+    // Verify modified description
+    const testSkill = parsed.skills.find((s: any) => s.name === "test-skill");
+    expect(testSkill).toBeDefined();
+    expect(testSkill.description).toBe("Updated description for testing");
+  });
+
+  it("reports hasScripts correctly after reload", async () => {
+    // Create a skill with scripts
+    const scriptSkillDir = join(SKILLS_DIR, "script-skill");
+    const scriptsDir = join(scriptSkillDir, "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+
+    writeFileSync(
+      join(scriptSkillDir, "SKILL.md"),
+      `---
+name: script-skill
+description: A skill with scripts
+---
+
+# Script Skill
+`,
+    );
+
+    writeFileSync(
+      join(scriptsDir, "test.sh"),
+      "#!/bin/bash\necho test",
+    );
+
+    // Reload skills
+    const result = await skills_reload.execute({});
+    const parsed = JSON.parse(result);
+
+    expect(parsed.success).toBe(true);
+
+    // Verify hasScripts is true
+    const scriptSkill = parsed.skills.find((s: any) => s.name === "script-skill");
+    expect(scriptSkill).toBeDefined();
+    expect(scriptSkill.hasScripts).toBe(true);
+  });
+
+  it("returns meaningful message with skill count", async () => {
+    const result = await skills_reload.execute({});
+    const parsed = JSON.parse(result);
+
+    expect(parsed.message).toMatch(/Reloaded \d+ skill\(s\)/);
+    expect(parsed.message).toContain("up-to-date");
+  });
+});
