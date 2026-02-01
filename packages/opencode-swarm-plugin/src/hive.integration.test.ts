@@ -565,6 +565,44 @@ describe("beads integration", () => {
         expect(epicResult.subtasks[i].title).toBe(titles[i]);
       }
     });
+
+    it("creates subtasks with descriptions", async () => {
+      const result = await hive_create_epic.execute(
+        {
+          epic_title: "Epic with subtask descriptions",
+          subtasks: [
+            { title: "Task 1", priority: 2, description: "First task does X" },
+            { title: "Task 2", priority: 3, description: "Second task does Y" },
+            { title: "Task 3", priority: 1 }, // No description - should be undefined
+          ],
+        },
+        mockContext,
+      );
+
+      const epicResult = parseResponse<EpicCreateResult>(result);
+      createdBeadIds.push(epicResult.epic.id);
+      for (const subtask of epicResult.subtasks) {
+        createdBeadIds.push(subtask.id);
+      }
+
+      expect(epicResult.success).toBe(true);
+      expect(epicResult.subtasks).toHaveLength(3);
+
+      // Verify descriptions are persisted via adapter
+      const subtask1 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[0].id);
+      const subtask2 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[1].id);
+      const subtask3 = await adapter.getCell(TEST_PROJECT_KEY, epicResult.subtasks[2].id);
+
+      expect(subtask1).toBeDefined();
+      expect(subtask1!.description).toBe("First task does X");
+      
+      expect(subtask2).toBeDefined();
+      expect(subtask2!.description).toBe("Second task does Y");
+      
+      expect(subtask3).toBeDefined();
+      // No description provided - should be undefined or empty
+      expect(subtask3!.description).toBeFalsy();
+    });
   });
 
   describe("beads_link_thread", () => {

@@ -329,6 +329,22 @@ export type {
 	Relationship,
 } from "./memory/entity-extraction";
 
+// Taxonomy extraction (SKOS knowledge organization)
+export {
+	extractTaxonomy,
+	findByTaxonomy,
+	getEntityHierarchy,
+	getInverseRelationships,
+	getTaxonomyForEntity,
+	storeTaxonomy,
+} from "./memory/taxonomy-extraction";
+export type {
+	ExtractedTaxonomyRelationship,
+	RelationshipType,
+	TaxonomyExtractionResult,
+	TaxonomyRelationship,
+} from "./memory/taxonomy-extraction";
+
 // ============================================================================
 // Drizzle Database Client (for memory store)
 // ============================================================================

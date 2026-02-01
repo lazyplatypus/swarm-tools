@@ -185,6 +185,7 @@ export const EpicCreateArgsSchema = z.object({
     .array(
       z.object({
         title: z.string().min(1),
+        description: z.string().optional(),
         priority: z.number().int().min(0).max(3).default(2),
         files: z.array(z.string()).optional().default([]),
         /**

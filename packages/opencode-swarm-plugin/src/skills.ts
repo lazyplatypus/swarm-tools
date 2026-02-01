@@ -1409,6 +1409,55 @@ executed with skills_execute. Use for:
   },
 });
 
+/**
+ * Reload all skills by clearing cache and re-scanning
+ *
+ * Enables Pi-inspired hot-reload workflow where agents can create/modify
+ * a skill and test it in the same session without restart.
+ */
+export const skills_reload = tool({
+  description: `Hot-reload skills by clearing cache and re-scanning skill directories.
+
+Use this to:
+- Test a newly created skill immediately without restarting
+- Verify skill modifications took effect
+- Refresh skills after external changes
+
+The tool clears the cached skills, re-scans all skill directories,
+and returns a list of loaded skills.`,
+  args: {},
+  async execute() {
+    // Clear cached skills
+    invalidateSkillsCache();
+
+    // Re-scan skill directories
+    const skills = await discoverSkills();
+
+    // Convert to SkillRef format for listing
+    const refs = Array.from(skills.values()).map((skill) => ({
+      name: skill.metadata.name,
+      description: skill.metadata.description,
+      path: skill.path,
+      hasScripts: skill.hasScripts,
+    }));
+
+    return JSON.stringify(
+      {
+        success: true,
+        reloaded: refs.length,
+        skills: refs.map((r) => ({
+          name: r.name,
+          description: r.description,
+          hasScripts: r.hasScripts,
+        })),
+        message: `Reloaded ${refs.length} skill(s). All skills are now up-to-date.`,
+      },
+      null,
+      2,
+    );
+  },
+});
+
 // =============================================================================
 // Skill Initialization
 // =============================================================================
@@ -1679,6 +1728,7 @@ export const skillsTools = {
   skills_update,
   skills_delete,
   skills_add_script,
+  skills_reload,
   skills_init,
 };
 

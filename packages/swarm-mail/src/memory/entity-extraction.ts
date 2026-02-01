@@ -16,7 +16,7 @@
  * @module memory/entity-extraction
  */
 
-import { generateText, Output } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { Client } from "@libsql/client";
 
@@ -45,12 +45,17 @@ export interface Relationship {
   createdAt: Date;
 }
 
+/** Extracted entity from LLM (before DB storage) */
+export interface ExtractedEntity {
+  name: string;
+  entityType: EntityType;
+  prefLabel?: string;
+  altLabels?: string[];
+}
+
 /** Result from LLM extraction (before DB storage) */
 export interface ExtractionResult {
-  entities: Array<{
-    name: string;
-    entityType: EntityType;
-  }>;
+  entities: ExtractedEntity[];
   relationships: Array<{
     subjectName: string;
     predicate: string;
@@ -69,6 +74,18 @@ const EntitySchema = z.object({
     .enum(["person", "project", "technology", "concept"])
     .describe(
       "Type of entity: person (people), project (software projects), technology (languages/frameworks), concept (abstract ideas)"
+    ),
+  prefLabel: z
+    .string()
+    .optional()
+    .describe(
+      "Preferred label (SKOS prefLabel) - the canonical/standard name for this entity"
+    ),
+  altLabels: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Alternative labels (SKOS altLabel) - synonyms, abbreviations, or alternative names"
     ),
 });
 
@@ -109,41 +126,57 @@ const ExtractionSchema = z.object({
  * Graceful degradation: returns empty arrays on LLM errors.
  *
  * @param content - Text content to extract from
- * @param config - Model configuration (model name + API key)
+ * @param config - Model configuration (model name + API key OR LanguageModel instance)
  * @returns Extracted entities and relationships
  *
  * @example
  * ```typescript
+ * // With model string (Anthropic via AI Gateway)
  * const result = await extractEntitiesAndRelationships(
  *   "Joel prefers TypeScript for Next.js",
  *   { model: "anthropic/claude-haiku-4-5", apiKey: process.env.API_KEY }
  * );
- * // { entities: [...], relationships: [...] }
+ *
+ * // With Ollama LanguageModel instance
+ * import { getOllamaExtractionModel } from "./ollama-llm.js";
+ * const result = await extractEntitiesAndRelationships(
+ *   "Joel prefers TypeScript for Next.js",
+ *   { languageModel: getOllamaExtractionModel() }
+ * );
  * ```
  */
 export async function extractEntitiesAndRelationships(
   content: string,
-  config: { model: string; apiKey?: string }
+  config: { model?: string; apiKey?: string; languageModel?: LanguageModel }
 ): Promise<ExtractionResult> {
   try {
-    // AI Gateway reads AI_GATEWAY_API_KEY from env automatically
-    // Only pass headers if explicitly provided (for testing)
-    const headers = config.apiKey
-      ? { Authorization: `Bearer ${config.apiKey}` }
-      : undefined;
+    // Support both string model names (AI Gateway) and LanguageModel instances (Ollama)
+    const modelConfig = config.languageModel
+      ? { model: config.languageModel as LanguageModel }
+      : {
+          model: config.model!,
+          headers: config.apiKey
+            ? { Authorization: `Bearer ${config.apiKey}` }
+            : undefined,
+        };
 
     const { output } = await generateText({
-      model: config.model,
+      ...modelConfig,
       prompt: `Extract named entities and relationships from the following text.
 
 Entities should be people, projects, technologies, or concepts mentioned.
+For each entity, extract:
+- name: The primary name used in the text
+- entityType: person, project, technology, or concept
+- prefLabel (optional): The preferred/canonical name if different from how it appears in text
+- altLabels (optional): Synonyms, abbreviations, or alternative names (e.g., "TS" for "TypeScript")
+
 Relationships should be clear subject-predicate-object triples.
 
 Text: ${content}`,
       output: Output.object({
         schema: ExtractionSchema,
       }),
-      ...(headers && { headers }),
     });
 
     return output as ExtractionResult;
@@ -216,10 +249,19 @@ export async function storeEntities(
 
       await db.execute(
         `
-        INSERT INTO entities (id, name, entity_type, canonical_name, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO entities (id, name, entity_type, canonical_name, pref_label, alt_labels, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
-        [id, entity.name, entity.entityType, entity.canonicalName ?? null, now, now]
+        [
+          id,
+          entity.name,
+          entity.entityType,
+          entity.canonicalName ?? null,
+          (entity as any).prefLabel ?? null,
+          (entity as any).altLabels ? JSON.stringify((entity as any).altLabels) : null,
+          now,
+          now,
+        ]
       );
 
       storedEntity = {

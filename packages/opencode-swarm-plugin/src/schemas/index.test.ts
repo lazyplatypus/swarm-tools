@@ -80,6 +80,30 @@ describe("EpicCreateArgsSchema", () => {
     };
     expect(() => EpicCreateArgsSchema.parse(args)).toThrow();
   });
+
+  it("validates subtask with description", () => {
+    const args = {
+      epic_title: "Big feature",
+      subtasks: [
+        { title: "Part 1", priority: 2, description: "First part does X" },
+        { title: "Part 2", priority: 3, description: "Second part does Y" },
+      ],
+    };
+    const result = EpicCreateArgsSchema.parse(args);
+    expect(result.subtasks[0].description).toBe("First part does X");
+    expect(result.subtasks[1].description).toBe("Second part does Y");
+  });
+
+  it("allows subtask without description", () => {
+    const args = {
+      epic_title: "Big feature",
+      subtasks: [
+        { title: "Part 1", priority: 2 },
+      ],
+    };
+    const result = EpicCreateArgsSchema.parse(args);
+    expect(result.subtasks[0].description).toBeUndefined();
+  });
 });
 
 describe("EvaluationSchema", () => {

@@ -56,6 +56,10 @@ const vector = (dimension: number) =>
  * - superseded_by: Link to superseding memory (NULL = not superseded)
  * - auto_tags: LLM-generated tags (JSON array as TEXT)
  * - keywords: Space-separated keywords for FTS boost
+ * - access_count: Number of times accessed (for decay resistance)
+ * - last_accessed: Last access timestamp (for decay tiers)
+ * - category: Fact type (relationship, milestone, status, preference, context)
+ * - status: Memory status (active, superseded)
  */
 export const memories = sqliteTable("memories", {
   id: text("id").primaryKey(),
@@ -74,6 +78,12 @@ export const memories = sqliteTable("memories", {
   // Auto-generated metadata
   auto_tags: text("auto_tags"),
   keywords: text("keywords"),
+  // Access tracking for decay tiers (hot/warm/cold)
+  access_count: text("access_count").default("0"), // INTEGER stored as TEXT for SQLite compat
+  last_accessed: text("last_accessed").default("(datetime('now'))"),
+  // Fact categorization
+  category: text("category"), // relationship, milestone, status, preference, context
+  status: text("status").default("'active'"), // active, superseded
 });
 
 /**
@@ -121,12 +131,16 @@ export type NewMemoryLink = typeof memoryLinks.$inferInsert;
  * - concept: RSC, TDD, event sourcing, etc.
  *
  * canonical_name: normalized form for de-duplication
+ * pref_label: SKOS preferred label (primary display name)
+ * alt_labels: SKOS alternative labels (JSON array of synonyms)
  */
 export const entities = sqliteTable("entities", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   entity_type: text("entity_type").notNull(),
   canonical_name: text("canonical_name"),
+  pref_label: text("pref_label"),
+  alt_labels: text("alt_labels").default("'[]'"),
   created_at: text("created_at").default("(datetime('now'))"),
   updated_at: text("updated_at").default("(datetime('now'))"),
 }, (table) => [
@@ -135,6 +149,29 @@ export const entities = sqliteTable("entities", {
 
 export type Entity = typeof entities.$inferSelect;
 export type NewEntity = typeof entities.$inferInsert;
+
+/**
+ * Entity Taxonomy table - SKOS-compliant hierarchical relationships
+ *
+ * SKOS relationship types:
+ * - broader: Parent concept (e.g., "React" broader than "React Hooks")
+ * - narrower: Child concept (e.g., "useState" narrower than "React Hooks")
+ * - related: Related but not hierarchical (e.g., "React" related to "Vue")
+ *
+ * Note: broader/narrower are inverse relationships - creating one implies the other
+ */
+export const entityTaxonomy = sqliteTable("entity_taxonomy", {
+  id: text("id").primaryKey(),
+  entity_id: text("entity_id").notNull().references(() => entities.id, { onDelete: "cascade" }),
+  related_entity_id: text("related_entity_id").notNull().references(() => entities.id, { onDelete: "cascade" }),
+  relationship_type: text("relationship_type").notNull(), // 'broader', 'narrower', 'related'
+  created_at: text("created_at").default("(datetime('now'))"),
+}, (table) => [
+  uniqueIndex("unique_taxonomy_link").on(table.entity_id, table.related_entity_id, table.relationship_type),
+]);
+
+export type EntityTaxonomy = typeof entityTaxonomy.$inferSelect;
+export type NewEntityTaxonomy = typeof entityTaxonomy.$inferInsert;
 
 /**
  * Relationships table - Entity-entity triples (subject-predicate-object)

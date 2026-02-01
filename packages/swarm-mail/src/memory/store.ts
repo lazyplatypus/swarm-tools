@@ -65,6 +65,33 @@ export interface SearchOptions {
   readonly limit?: number;
   readonly threshold?: number;
   readonly collection?: string;
+  /** Track access for returned memories (updates last_accessed, increments access_count) */
+  readonly trackAccess?: boolean;
+  /** Filter by decay tier: 'hot' (7d), 'warm' (30d), 'all' (default) */
+  readonly decayTier?: "hot" | "warm" | "all";
+}
+
+/** Decay tier thresholds (in days) */
+const DECAY_TIERS = {
+  hot: 7,      // Accessed in last 7 days
+  warm: 30,    // Accessed in last 30 days
+  cold: 90,    // Accessed more than 30 days ago
+} as const;
+
+/** Calculate decay tier based on last_accessed and access_count */
+export function getDecayTier(lastAccessed: Date | null, accessCount: number): "hot" | "warm" | "cold" {
+  if (!lastAccessed) return "cold";
+
+  const now = new Date();
+  const daysSinceAccess = (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24);
+
+  // High frequency (10+ accesses) resists decay - add 7 days buffer
+  const frequencyBonus = accessCount >= 10 ? 7 : accessCount >= 5 ? 3 : 0;
+  const effectiveDays = daysSinceAccess - frequencyBonus;
+
+  if (effectiveDays <= DECAY_TIERS.hot) return "hot";
+  if (effectiveDays <= DECAY_TIERS.warm) return "warm";
+  return "cold";
 }
 
 // ============================================================================
@@ -173,14 +200,14 @@ export function createMemoryStore(db: SwarmDb) {
      * 4. Calculating distance separately with vector_distance_cos()
      *
      * @param queryEmbedding - 1024-dimensional query vector
-     * @param options - Search options (limit, threshold, collection)
+     * @param options - Search options (limit, threshold, collection, trackAccess, decayTier)
      * @returns Array of search results sorted by similarity (highest first)
      */
     async search(
       queryEmbedding: number[],
       options: SearchOptions = {}
     ): Promise<SearchResult[]> {
-      const { limit = 10, threshold = 0.3, collection } = options;
+      const { limit = 10, threshold = 0.3, collection, trackAccess: shouldTrack = false, decayTier = "all" } = options;
       const vectorStr = JSON.stringify(queryEmbedding);
 
       // Use vector_top_k for efficient ANN search via the vector index
@@ -194,6 +221,16 @@ export function createMemoryStore(db: SwarmDb) {
         ? sql`AND m.collection = ${collection}`
         : sql``;
 
+      // Decay tier filter based on last_accessed
+      const decayFilter = decayTier === "hot"
+        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
+        : decayTier === "warm"
+        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
+        : sql``;
+
+      // Only return active memories (not superseded)
+      const statusFilter = sql`AND (m.status IS NULL OR m.status = 'active')`;
+
       const results = await db.all<{
         id: string;
         content: string;
@@ -202,20 +239,32 @@ export function createMemoryStore(db: SwarmDb) {
         created_at: string;
         decay_factor: number;
         distance: number;
+        access_count: string;
+        last_accessed: string;
       }>(sql`
-        SELECT 
+        SELECT
           m.id,
           m.content,
           m.metadata,
           m.collection,
           m.created_at,
           m.decay_factor,
+          m.access_count,
+          m.last_accessed,
           vector_distance_cos(m.embedding, vector(${vectorStr})) as distance
         FROM vector_top_k('idx_memories_embedding', vector(${vectorStr}), ${limit * 2}) AS v
         JOIN memories m ON m.rowid = v.id
-        WHERE (1 - vector_distance_cos(m.embedding, vector(${vectorStr}))) >= ${threshold} ${collectionFilter}
+        WHERE (1 - vector_distance_cos(m.embedding, vector(${vectorStr}))) >= ${threshold}
+          ${collectionFilter}
+          ${decayFilter}
+          ${statusFilter}
         LIMIT ${limit}
       `);
+
+      // Track access for returned memories
+      if (shouldTrack && results.length > 0) {
+        await this.trackAccess(results.map(r => r.id));
+      }
 
       return results.map((row) => ({
         memory: parseMemoryRow(row as unknown as typeof memories.$inferSelect),
@@ -231,14 +280,14 @@ export function createMemoryStore(db: SwarmDb) {
      * Falls back to raw SQL since FTS5 isn't yet in Drizzle.
      *
      * @param searchQuery - Text query string
-     * @param options - Search options (limit, collection)
+     * @param options - Search options (limit, collection, trackAccess, decayTier)
      * @returns Array of search results ranked by relevance
      */
     async ftsSearch(
       searchQuery: string,
       options: SearchOptions = {}
     ): Promise<SearchResult[]> {
-      const { limit = 10, collection } = options;
+      const { limit = 10, collection, trackAccess: shouldTrack = false, decayTier = "all" } = options;
 
       // Defense in depth: graceful degradation at store layer
       if (!searchQuery || typeof searchQuery !== 'string') {
@@ -251,10 +300,14 @@ export function createMemoryStore(db: SwarmDb) {
       // Without quotes, "unique-keyword-12345" → "unique" MINUS "keyword" → error
       const quotedQuery = `"${searchQuery.replace(/"/g, '""')}"`;
 
-      // Build query dynamically based on collection filter
-      const conditions = collection
-        ? sql`fts.content MATCH ${quotedQuery} AND m.collection = ${collection}`
-        : sql`fts.content MATCH ${quotedQuery}`;
+      // Build filters
+      const collectionFilter = collection ? sql`AND m.collection = ${collection}` : sql``;
+      const decayFilter = decayTier === "hot"
+        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-7 days')`
+        : decayTier === "warm"
+        ? sql`AND datetime(m.last_accessed) >= datetime('now', '-30 days')`
+        : sql``;
+      const statusFilter = sql`AND (m.status IS NULL OR m.status = 'active')`;
 
       const results = await db.all<{
         id: string;
@@ -265,7 +318,7 @@ export function createMemoryStore(db: SwarmDb) {
         decay_factor: number;
         score: number;
       }>(sql`
-        SELECT 
+        SELECT
           m.id,
           m.content,
           m.metadata,
@@ -275,16 +328,44 @@ export function createMemoryStore(db: SwarmDb) {
           fts.rank as score
         FROM memories_fts fts
         JOIN memories m ON m.rowid = fts.rowid
-        WHERE ${conditions}
+        WHERE fts.content MATCH ${quotedQuery}
+          ${collectionFilter}
+          ${decayFilter}
+          ${statusFilter}
         ORDER BY fts.rank
         LIMIT ${limit}
       `);
+
+      // Track access for returned memories
+      if (shouldTrack && results.length > 0) {
+        await this.trackAccess(results.map(r => r.id));
+      }
 
       return results.map((row) => ({
         memory: parseMemoryRow(row as unknown as typeof memories.$inferSelect),
         score: Math.abs(row.score), // FTS5 rank is negative, normalize
         matchType: "fts" as const,
       }));
+    },
+
+    /**
+     * Supersede a memory (no deletion - mark as superseded and link to new memory)
+     *
+     * Instead of deleting, marks the old memory as superseded and creates
+     * a chain to the new memory via superseded_by pointer.
+     *
+     * @param oldId - Memory ID to supersede
+     * @param newId - New memory ID that replaces it
+     */
+    async supersede(oldId: string, newId: string): Promise<void> {
+      await db.run(sql`
+        UPDATE memories
+        SET
+          status = 'superseded',
+          superseded_by = ${newId},
+          updated_at = datetime('now')
+        WHERE id = ${oldId}
+      `);
     },
 
     /**
@@ -306,18 +387,46 @@ export function createMemoryStore(db: SwarmDb) {
     },
 
     /**
+     * Track memory access (update last_accessed, increment access_count)
+     *
+     * @param ids - Memory ID(s) to track
+     */
+    async trackAccess(ids: string | string[]): Promise<void> {
+      const idArray = Array.isArray(ids) ? ids : [ids];
+      if (idArray.length === 0) return;
+
+      // Use raw SQL for efficient batch update
+      // Note: access_count stored as TEXT, need to cast for arithmetic
+      await db.run(sql`
+        UPDATE memories
+        SET
+          access_count = CAST(COALESCE(CAST(access_count AS INTEGER), 0) + 1 AS TEXT),
+          last_accessed = datetime('now')
+        WHERE id IN (${sql.join(idArray.map(id => sql`${id}`), sql`, `)})
+      `);
+    },
+
+    /**
      * Get a single memory by ID
      *
      * @param id - Memory ID
+     * @param trackAccess - Whether to track this access (default: false)
      * @returns Memory or null if not found
      */
-    async get(id: string): Promise<Memory | null> {
+    async get(id: string, trackAccess = false): Promise<Memory | null> {
       const results = await db
         .select()
         .from(memories)
         .where(eq(memories.id, id));
 
-      return results.length > 0 ? parseMemoryRow(results[0]) : null;
+      if (results.length === 0) return null;
+
+      // Track access if requested
+      if (trackAccess) {
+        await this.trackAccess(id);
+      }
+
+      return parseMemoryRow(results[0]);
     },
 
     /**
