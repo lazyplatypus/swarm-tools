@@ -87,6 +87,15 @@
             "command": "swarm claude post-complete"
           }
         ]
+      },
+      {
+        "matcher": "skills_create|skills_update|skills_init|mcp__plugin_swarm_swarm-tools__skills_create|mcp__plugin_swarm_swarm-tools__skills_update",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude skill-reload"
+          }
+        ]
       }
     ],
     "PreCompact": [

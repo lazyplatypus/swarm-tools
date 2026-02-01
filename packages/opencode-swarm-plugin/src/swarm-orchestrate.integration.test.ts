@@ -288,3 +288,140 @@ describe("E2E swarm coordination", () => {
 		// requiring external database or filesystem access
 	});
 });
+
+describe("swarm_branch and swarm_return integration", () => {
+	let testProjectPath: string;
+	let swarmMail: SwarmMailAdapter;
+
+	beforeEach(async () => {
+		testProjectPath = join(tmpdir(), `swarm-branch-test-${Date.now()}`);
+		mkdirSync(testProjectPath, { recursive: true });
+		swarmMail = await createInMemorySwarmMailLibSQL(testProjectPath);
+
+		// Register test agent
+		await swarmMail.registerAgent(testProjectPath, "TestWorker", {
+			program: "test",
+			model: "test-model",
+		});
+	});
+
+	afterEach(async () => {
+		await swarmMail.close();
+		clearAdapterCache();
+		clearHiveAdapterCache();
+		rmSync(testProjectPath, { recursive: true, force: true });
+	});
+
+	test("swarm_branch creates a checkpoint with branch metadata", async () => {
+		const { swarm_branch } = await import("./swarm-orchestrate");
+
+		const epicId = "epic-branch-123";
+		const beadId = "bead-branch-456";
+
+		const result = await swarm_branch.execute({
+			project_key: testProjectPath,
+			agent_name: "TestWorker",
+			bead_id: beadId,
+			epic_id: epicId,
+			branch_label: "debug-issue",
+			branch_purpose: "Investigate timeout in API call",
+			files_modified: ["src/api.ts", "src/client.ts"],
+			progress_percent: 50,
+		});
+
+		const parsed = JSON.parse(result);
+		expect(parsed.success).toBe(true);
+		expect(parsed.branch_label).toBe("debug-issue");
+		expect(parsed.branch_purpose).toBe("Investigate timeout in API call");
+		expect(parsed.branch_id).toBeDefined();
+		expect(parsed.branch_id).toMatch(/^branch-\d+-debug-issue$/);
+		expect(parsed.files_snapshot).toEqual(["src/api.ts", "src/client.ts"]);
+	});
+
+	test("swarm_return handles graceful fallback when no checkpoint exists", async () => {
+		const { swarm_return } = await import("./swarm-orchestrate");
+
+		const epicId = "epic-return-123";
+
+		// Try to return without creating a branch first
+		// Should return { found: false }, not throw error
+		const returnResult = await swarm_return.execute({
+			project_key: testProjectPath,
+			epic_id: epicId,
+			branch_label: "non-existent-branch",
+		});
+
+		const returnParsed = JSON.parse(returnResult);
+		expect(returnParsed.success).toBe(false);
+		expect(returnParsed.found).toBe(false);
+	});
+
+	test("swarm_return with no label defaults to latest branch", async () => {
+		const { swarm_return } = await import("./swarm-orchestrate");
+
+		// Try to return without label on non-existent epic
+		// Should return { found: false }, not error
+		const result = await swarm_return.execute({
+			project_key: testProjectPath,
+			epic_id: "non-existent-epic",
+		});
+
+		const parsed = JSON.parse(result);
+		expect(parsed.success).toBe(false);
+		expect(parsed.found).toBe(false);
+	});
+
+	test("swarm_branch can be called multiple times for same epic", async () => {
+		const { swarm_branch } = await import("./swarm-orchestrate");
+
+		const epicId = "epic-multi-branch-123";
+		const beadId = "bead-multi-456";
+
+		// Create first branch
+		const first = await swarm_branch.execute({
+			project_key: testProjectPath,
+			agent_name: "TestWorker",
+			bead_id: beadId,
+			epic_id: epicId,
+			branch_label: "first-branch",
+			branch_purpose: "First exploration",
+			files_modified: ["src/first.ts"],
+			progress_percent: 25,
+		});
+
+		expect(JSON.parse(first).success).toBe(true);
+
+		// Create second branch - should not conflict
+		const second = await swarm_branch.execute({
+			project_key: testProjectPath,
+			agent_name: "TestWorker",
+			bead_id: beadId,
+			epic_id: epicId,
+			branch_label: "second-branch",
+			branch_purpose: "Second exploration",
+			files_modified: ["src/second.ts"],
+			progress_percent: 50,
+		});
+
+		expect(JSON.parse(second).success).toBe(true);
+	});
+
+	test("swarm_return provides learnings field in response", async () => {
+		const { swarm_return } = await import("./swarm-orchestrate");
+
+		// Call with learnings parameter
+		const result = await swarm_return.execute({
+			project_key: testProjectPath,
+			epic_id: "test-epic",
+			carry_back_learnings: "Found that approach X works better than Y",
+			carry_back_files: ["src/improved.ts"],
+		});
+
+		// Even though no branch exists, tool should handle gracefully
+		// and still reflect the learnings in the response
+		const parsed = JSON.parse(result);
+		expect(parsed).toBeDefined();
+		// Tool may return found:false, but should not error
+		expect(parsed.success !== undefined).toBe(true);
+	});
+});

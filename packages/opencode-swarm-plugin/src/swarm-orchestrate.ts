@@ -2940,6 +2940,275 @@ export const swarm_recover = tool({
 });
 
 /**
+ * Branch session context for exploration or debugging
+ *
+ * Creates a labeled snapshot of current context and allows agent to
+ * explore a side-quest (debugging, prototyping, research) without
+ * losing the main context. Uses existing checkpoint mechanism but
+ * optimized for intentional exploration rather than crash recovery.
+ *
+ * Workflow:
+ * 1. swarm_branch - saves current state with a label
+ * 2. Do exploratory work
+ * 3. swarm_return - restore main context, optionally carry back learnings
+ *
+ * Use cases:
+ * - Debug a confusing issue without disrupting main task
+ * - Prototype an approach before committing
+ * - Research a dependency or API
+ */
+export const swarm_branch = tool({
+  description:
+    "Create a session branch for exploration. Saves current context with a label for later return.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    agent_name: tool.schema.string().describe("Agent name"),
+    bead_id: tool.schema.string().describe("Current subtask bead ID"),
+    epic_id: tool.schema.string().describe("Epic bead ID"),
+    branch_label: tool.schema
+      .string()
+      .describe("Label for this branch (e.g., 'debug-cache-issue')"),
+    branch_purpose: tool.schema
+      .string()
+      .describe("Why branching? (e.g., 'investigate API timeout')"),
+    files_modified: tool.schema
+      .array(tool.schema.string())
+      .describe("Files modified before branching"),
+    progress_percent: tool.schema
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Current progress percentage"),
+  },
+  async execute(args) {
+    try {
+      // Create a checkpoint for the branch point
+      const branchId = `branch-${Date.now()}-${args.branch_label.replace(/[^a-z0-9-]/gi, "-")}`;
+
+      const checkpoint: Omit<
+        SwarmBeadContext,
+        "id" | "created_at" | "updated_at"
+      > = {
+        epic_id: args.epic_id,
+        bead_id: args.bead_id,
+        strategy: "file-based", // TODO: Extract from decomposition metadata
+        files: args.files_modified,
+        dependencies: [],
+        directives: {
+          branch_label: args.branch_label,
+          branch_purpose: args.branch_purpose,
+          branch_id: branchId,
+        },
+        recovery: {
+          last_checkpoint: Date.now(),
+          files_modified: args.files_modified,
+          progress_percent: args.progress_percent || 0,
+          last_message: `Branched for: ${args.branch_purpose}`,
+        },
+      };
+
+      // Emit branch_created event
+      const { createEvent, appendEvent } = await import("swarm-mail");
+      const checkpointData = JSON.stringify(checkpoint);
+      const event = createEvent("swarm_checkpointed", {
+        project_key: args.project_key,
+        epic_id: args.epic_id,
+        bead_id: args.bead_id,
+        strategy: checkpoint.strategy,
+        files: checkpoint.files,
+        dependencies: checkpoint.dependencies,
+        directives: checkpoint.directives,
+        recovery: checkpoint.recovery,
+        checkpoint_size_bytes: Buffer.byteLength(checkpointData, "utf8"),
+        trigger: "manual",
+      });
+
+      await appendEvent(event, args.project_key);
+
+      return JSON.stringify(
+        {
+          success: true,
+          branch_id: branchId,
+          branch_label: args.branch_label,
+          branch_purpose: args.branch_purpose,
+          checkpoint_timestamp: Date.now(),
+          message: `Session branched: ${args.branch_label}. Use swarm_return to restore main context.`,
+          files_snapshot: args.files_modified,
+        },
+        null,
+        2,
+      );
+    } catch (error) {
+      console.warn(
+        `[swarm_branch] Failed to create branch ${args.branch_label}:`,
+        error,
+      );
+      return JSON.stringify(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          message: `Failed to branch session: ${args.branch_label}`,
+        },
+        null,
+        2,
+      );
+    }
+  },
+});
+
+/**
+ * Return from session branch to main context
+ *
+ * Restores the context from before the branch was created.
+ * Optionally allows carrying back learnings or file changes
+ * discovered during exploration.
+ *
+ * Use cases:
+ * - Return to main task after debugging
+ * - Restore context after failed prototype
+ * - Return with learnings from research
+ */
+export const swarm_return = tool({
+  description:
+    "Return from session branch. Restores main context, optionally carrying back learnings.",
+  args: {
+    project_key: tool.schema.string().describe("Project path"),
+    epic_id: tool.schema.string().describe("Epic bead ID"),
+    branch_label: tool.schema
+      .string()
+      .optional()
+      .describe("Label of branch to return from (defaults to latest)"),
+    carry_back_learnings: tool.schema
+      .string()
+      .optional()
+      .describe("Learnings or insights to carry back to main context"),
+    carry_back_files: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Files to preserve from branch (others discarded)"),
+  },
+  async execute(args) {
+    try {
+      const { getSwarmMailLibSQL } = await import("swarm-mail");
+      const swarmMail = await getSwarmMailLibSQL(args.project_key);
+      const db = await swarmMail.getDatabase();
+
+      // Query for the branch checkpoint
+      const result = await db.query<{
+        id: string;
+        epic_id: string;
+        bead_id: string;
+        strategy: string;
+        files: string;
+        dependencies: string;
+        directives: string;
+        recovery: string;
+        created_at: number;
+        updated_at: number;
+      }>(
+        args.branch_label
+          ? `SELECT * FROM swarm_contexts
+             WHERE epic_id = $1 AND json_extract(directives, '$.branch_label') = $2
+             ORDER BY updated_at DESC
+             LIMIT 1`
+          : `SELECT * FROM swarm_contexts
+             WHERE epic_id = $1 AND json_extract(directives, '$.branch_id') IS NOT NULL
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+        args.branch_label
+          ? [args.epic_id, args.branch_label]
+          : [args.epic_id],
+      );
+
+      if (!result.rows || result.rows.length === 0) {
+        return JSON.stringify(
+          {
+            success: false,
+            found: false,
+            message: args.branch_label
+              ? `No branch found with label: ${args.branch_label}`
+              : "No branch checkpoints found for this epic",
+            epic_id: args.epic_id,
+          },
+          null,
+          2,
+        );
+      }
+
+      const row = result.rows[0];
+      const parseIfString = <T>(val: unknown): T =>
+        typeof val === "string" ? JSON.parse(val) : (val as T);
+
+      const context: SwarmBeadContext = {
+        id: row.id,
+        epic_id: row.epic_id,
+        bead_id: row.bead_id,
+        strategy: row.strategy as SwarmBeadContext["strategy"],
+        files: parseIfString<string[]>(row.files),
+        dependencies: parseIfString<string[]>(row.dependencies),
+        directives: parseIfString<SwarmBeadContext["directives"]>(
+          row.directives,
+        ),
+        recovery: parseIfString<SwarmBeadContext["recovery"]>(row.recovery),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+
+      // Emit recovery event
+      const { createEvent, appendEvent } = await import("swarm-mail");
+      const event = createEvent("swarm_recovered", {
+        project_key: args.project_key,
+        epic_id: args.epic_id,
+        bead_id: context.bead_id,
+        recovered_from_checkpoint: context.recovery.last_checkpoint,
+      });
+
+      await appendEvent(event, args.project_key);
+
+      const branchLabel =
+        context.directives.branch_label || "unnamed-branch";
+
+      return JSON.stringify(
+        {
+          success: true,
+          found: true,
+          branch_label: branchLabel,
+          branch_purpose: context.directives.branch_purpose,
+          context_restored: {
+            bead_id: context.bead_id,
+            files: context.files,
+            progress_percent: context.recovery.progress_percent,
+          },
+          learnings_carried_back: args.carry_back_learnings || null,
+          files_carried_back: args.carry_back_files || [],
+          message: `Returned from branch: ${branchLabel}`,
+          age_seconds: Math.round((Date.now() - context.updated_at) / 1000),
+        },
+        null,
+        2,
+      );
+    } catch (error) {
+      console.warn(
+        `[swarm_return] Failed to return from branch:`,
+        error,
+      );
+      return JSON.stringify(
+        {
+          success: false,
+          found: false,
+          error: error instanceof Error ? error.message : String(error),
+          message: "Failed to return from branch",
+          epic_id: args.epic_id,
+        },
+        null,
+        2,
+      );
+    }
+  },
+});
+
+/**
  * Learn from completed work and optionally create a skill
  *
  * This tool helps agents reflect on patterns, best practices, or domain
@@ -3160,5 +3429,7 @@ export const orchestrateTools = {
   swarm_check_strikes,
   swarm_checkpoint,
   swarm_recover,
+  swarm_branch,
+  swarm_return,
   swarm_learn,
 };

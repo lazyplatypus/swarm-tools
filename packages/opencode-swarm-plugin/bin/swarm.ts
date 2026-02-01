@@ -118,6 +118,9 @@ import { detectRegressions } from "../src/regression-detection.js";
 // All tools (for tool command)
 import { allTools } from "../src/index.js";
 
+// Skills (for skill-reload command)
+import { invalidateSkillsCache, discoverSkills } from "../src/skills.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // When running from bin/swarm.ts, go up one level to find package.json
 // When bundled to dist/bin/swarm.js, go up two levels
@@ -2857,6 +2860,9 @@ async function claudeCommand() {
     case "compliance":
       await claudeCompliance();
       break;
+    case "skill-reload":
+      await claudeSkillReload();
+      break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
       showClaudeHelp();
@@ -2880,6 +2886,7 @@ Commands:
   post-complete       Hook: post-swarm_complete learnings reminder
   pre-compact         Hook: pre-compaction handler
   session-end         Hook: session cleanup
+  skill-reload        Hook: hot-reload skills after modification
 `);
 }
 
@@ -3588,6 +3595,32 @@ async function claudeCompliance() {
     }));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Hot-reload skills by clearing cache and re-scanning directories.
+ * Triggered by Claude Code hook when skill files are modified.
+ */
+async function claudeSkillReload() {
+  try {
+    // Clear the skills cache
+    invalidateSkillsCache();
+
+    // Re-scan skill directories to get updated list
+    const skills = await discoverSkills();
+
+    // Return success with count
+    console.log(JSON.stringify({
+      success: true,
+      reloaded: skills.size,
+      message: `Reloaded ${skills.size} skill(s)`,
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
   }
 }
 
@@ -4550,6 +4583,7 @@ ${cyan("Claude Code:")}
   swarm claude compliance           Hook: show session compliance data
   swarm claude pre-compact          Hook: pre-compaction handler
   swarm claude session-end          Hook: session cleanup
+  swarm claude skill-reload         Hook: hot-reload skills after modification
 
 ${cyan("Customization:")}
   Edit the generated files to customize behavior:
