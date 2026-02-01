@@ -493,6 +493,28 @@ console.log(extracted.relationships); // [{ from: "Joel", to: "TypeScript", type
 > ollama pull mxbai-embed-large
 > ```
 
+#### Configuring the Embedding Model
+
+Switch embedding models via environment variables:
+
+```bash
+# Set in your shell or .env file
+export OLLAMA_HOST=http://localhost:11434  # Ollama server URL (default)
+export OLLAMA_MODEL=nomic-embed-text       # Model name (default: mxbai-embed-large)
+export OLLAMA_EMBED_DIM=768                # Override dimension (auto-detected for known models)
+```
+
+**Supported models:**
+
+| Model | Dimensions | Context | Notes |
+|-------|------------|---------|-------|
+| `mxbai-embed-large` | 1024 | 512 tokens | Default, high quality |
+| `nomic-embed-text` | 768 | 8192 tokens | Large context window |
+| `all-minilm` | 384 | 512 tokens | Lightweight, fast |
+| `snowflake-arctic-embed` | 1024 | 512 tokens | Alternative high quality |
+
+**Important:** Switching models after storing memories requires regenerating embeddings (different models produce incompatible vector spaces).
+
 ### Custom Database Setup
 
 Bring your own libSQL database:

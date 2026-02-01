@@ -209,6 +209,17 @@ Every completion records duration, errors, files touched, success.
 
 Run `swarm doctor` to check status.
 
+### Embedding Model Configuration
+
+Configure the embedding model via environment variables:
+
+```bash
+export OLLAMA_MODEL=nomic-embed-text  # Default: mxbai-embed-large
+export OLLAMA_HOST=http://localhost:11434  # Default
+```
+
+Supported models: `mxbai-embed-large` (1024d), `nomic-embed-text` (768d), `all-minilm` (384d), `snowflake-arctic-embed` (1024d). See [swarm-mail docs](packages/swarm-mail/README.md#configuring-the-embedding-model) for details.
+
 ---
 
 ## Development

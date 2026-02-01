@@ -112,6 +112,47 @@ ollama pull mxbai-embed-large
 
 Without Ollama, memory falls back to full-text search (still functional, less semantic).
 
+### Configuring the Embedding Model
+
+You can switch embedding models via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `mxbai-embed-large` | Embedding model name |
+| `OLLAMA_EMBED_DIM` | Auto-detected | Override embedding dimension |
+
+**Supported models and dimensions:**
+
+| Model | Dimensions | Context | Notes |
+|-------|------------|---------|-------|
+| `mxbai-embed-large` | 1024 | 512 tokens | Default, high quality |
+| `nomic-embed-text` | 768 | 8192 tokens | Large context window |
+| `all-minilm` | 384 | 512 tokens | Lightweight, fast |
+| `snowflake-arctic-embed` | 1024 | 512 tokens | Alternative high quality |
+
+**Example: Using nomic-embed-text**
+
+```bash
+# Pull the model
+ollama pull nomic-embed-text
+
+# Set environment variables
+export OLLAMA_MODEL=nomic-embed-text
+
+# Or in .env file
+OLLAMA_MODEL=nomic-embed-text
+```
+
+**Note:** If you switch models after already storing memories, you should regenerate embeddings or start fresh. Different models produce incompatible vector spaces.
+
+**Custom models:** If using a model not in the table above, set `OLLAMA_EMBED_DIM` to the correct dimension:
+
+```bash
+export OLLAMA_MODEL=my-custom-model
+export OLLAMA_EMBED_DIM=512
+```
+
 ### Using the Tools
 
 The plugin exposes 8 memory tools:
